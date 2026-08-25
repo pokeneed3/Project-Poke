@@ -1,7 +1,9 @@
 local PLACEIDS = {}
 
-if game.PlaceId == SPECIFIC_PLACE_ID then
+if game.PlaceId == 77649408247578 then
+	loadstring(game:HttpGet("https://github.com/pokeneed3/Scripts/blob/main/ProjectPokeDungeonQuest.Lua"))()
 else
 	-- Load Universal script instead
-	loadstring(game:HttpGet("https://raw.githubusercontent.com/yourname/yourrepo/main/Universal.lua"))()
+	print("hi")
+	--loadstring(game:HttpGet("https://raw.githubusercontent.com/yourname/yourrepo/main/Universal.lua"))()
 end
