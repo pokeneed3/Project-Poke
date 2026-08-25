@@ -301,11 +301,59 @@ end
 
 --[[
 
-local Event = game:GetService("ReplicatedStorage").remotes.abilityUsed
-	Event:FireServer("e", game:GetService("Players").LocalPlayer.Backpack.Whirlwind)
+local AbilityConfigs = {
+    -- Tool name = how to fire it
+    ["Whirlwind"] = {
+        UseAbilityRemote = true,          -- fires the shared abilityUsed remote
+        AbilityArg = "e",                 -- or "q"
+        ExtraArgs = {},                   -- extra args for abilityUsed if needed
+        HasSpellEvent = true,
+        SpellArgs = {},                   -- args for spellEvent:FireServer(...)
+    },
+    ["SomeOtherAbility"] = {
+        UseAbilityRemote = true,
+        AbilityArg = "e",
+        ExtraArgs = {"special"},          -- example of different args
+        HasSpellEvent = true,
+        SpellArgs = {true, 5},            -- different args
+    },
+    ["SimpleAbility"] = {
+        UseAbilityRemote = false,         -- this one only uses its own remote
+        HasSpellEvent = true,
+        SpellArgs = {},
+    },
+    -- add more as you discover them
+}
 
-	local Event1 = game:GetService("Players").LocalPlayer.Backpack.Whirlwind.spellEvent
-	Event1:FireServer()
+local function fireAbility(toolName)
+    local tool = getSelectedTool(toolName)  -- your existing helper
+    if not tool then return end
+
+    local config = AbilityConfigs[toolName]
+    if not config then
+        -- fallback for unknown tools (your old generic method)
+        local remote = game:GetService("ReplicatedStorage").remotes.abilityUsed
+        remote:FireServer("e", tool)
+        local spellEvent = tool:FindFirstChild("spellEvent")
+        if spellEvent then
+            spellEvent:FireServer()
+        end
+        return
+    end
+
+    -- Use the config
+    if config.UseAbilityRemote then
+        local remote = game:GetService("ReplicatedStorage").remotes.abilityUsed
+        remote:FireServer(config.AbilityArg, tool, table.unpack(config.ExtraArgs or {}))
+    end
+
+    if config.HasSpellEvent then
+        local spellEvent = tool:FindFirstChild("spellEvent")
+        if spellEvent then
+            spellEvent:FireServer(table.unpack(config.SpellArgs or {}))
+        end
+    end
+end
 
 ]]
 
