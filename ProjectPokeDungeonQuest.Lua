@@ -1,10 +1,11 @@
 -- Services
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 -- Player
 local player = Players.LocalPlayer
-
 local PLAYER_NAMETAG = player.PlayerGui.playerStatus.Frame.playerName
 
 local Character, Humanoid, HumanoidRootPart
@@ -21,21 +22,23 @@ local CurrentJumpPowerValue = DEFAULT_JUMPPOWER
 local CurrentFarmSpeedValue = DEFAULT_FARMSPEED
 local CurrentFarmYOffset = DEFAULT_FARMYOFFSET
 
--- Define these early so onCharacterAdded can use them
+local AutoFarmEnabled = false
+local AbilityLoopRunning = false
+local InfiniteJumpEnabled = false
+
+-- Speed / Jump
 local function applySpeed()
 	local hum = Humanoid or (Character and Character:FindFirstChildOfClass("Humanoid"))
-	if not hum then
-		return
+	if hum then
+		hum.WalkSpeed = ToggleSpeedEnabled and CurrentSpeedValue or DEFAULT_SPEED
 	end
-	hum.WalkSpeed = ToggleSpeedEnabled and CurrentSpeedValue or DEFAULT_SPEED
 end
 
 local function applyJumpPower()
 	local hum = Humanoid or (Character and Character:FindFirstChildOfClass("Humanoid"))
-	if not hum then
-		return
+	if hum then
+		hum.JumpPower = ToggleJumpPowerEnabled and CurrentJumpPowerValue or DEFAULT_JUMPPOWER
 	end
-	hum.JumpPower = ToggleJumpPowerEnabled and CurrentJumpPowerValue or DEFAULT_JUMPPOWER
 end
 
 -- Character handling
@@ -43,12 +46,10 @@ local function onCharacterAdded(char)
 	Character = char
 	Humanoid = char:WaitForChild("Humanoid")
 	HumanoidRootPart = char:WaitForChild("HumanoidRootPart")
-
 	applySpeed()
 	applyJumpPower()
 end
 
--- Connect once
 if player.Character then
 	onCharacterAdded(player.Character)
 end
@@ -60,6 +61,7 @@ player.CharacterRemoving:Connect(function()
 	HumanoidRootPart = nil
 end)
 
+-- Library
 local repo = "https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/"
 local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
 local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
@@ -79,59 +81,31 @@ local Tabs = {
 	["UI Settings"] = Window:AddTab("UI Settings"),
 }
 
+-- ====================== MAIN TAB ======================
 local TabBox = Tabs.Main:AddLeftTabbox()
 local Movement = TabBox:AddTab("Movement")
 local MainSettings = TabBox:AddTab("Options")
 
 local RightTabBox = Tabs.Main:AddRightTabbox()
 local General1 = RightTabBox:AddTab("General")
-local MainSettings1 = RightTabBox:AddTab("Options")
-
-local ToggleStreamerMode = false
 
 General1:AddToggle("ToggleStreamerMode", {
 	Text = "StreamerMode",
 	Default = false,
 	Tooltip = "Hides your name",
-
 	Callback = function(Value)
-		ToggleStreamerMode = Value
+		if Value then
+			PLAYER_NAMETAG.Text = "Project Poke"
+		else
+			PLAYER_NAMETAG.Text = player.Name
+		end
 	end,
 })
-
-Toggles.ToggleStreamerMode:OnChanged(function()
-	if not Toggles.ToggleStreamerMode.Value then
-		PLAYER_NAMETAG.Text = player.Name
-	else
-		PLAYER_NAMETAG.Text = "Project Poke"
-	end
-end)
-
---[[
-player.PlayerGui.playerStatus.Frame.playerName
-]]
-
-function applySpeed()
-	local hum = Humanoid or (Character and Character:FindFirstChildOfClass("Humanoid"))
-	if not hum then
-		return
-	end
-	hum.WalkSpeed = ToggleSpeedEnabled and CurrentSpeedValue or DEFAULT_SPEED
-end
-
-function applyJumpPower()
-	local hum = Humanoid or (Character and Character:FindFirstChildOfClass("Humanoid"))
-	if not hum then
-		return
-	end
-	hum.JumpPower = ToggleJumpPowerEnabled and CurrentJumpPowerValue or DEFAULT_JUMPPOWER
-end
 
 Movement:AddToggle("ToggleSpeed", {
 	Text = "Speed",
 	Default = false,
 	Tooltip = "Makes your character move faster",
-
 	Callback = function(Value)
 		ToggleSpeedEnabled = Value
 		applySpeed()
@@ -141,9 +115,6 @@ Movement:AddToggle("ToggleSpeed", {
 	SyncToggleState = true,
 	Text = "Speed",
 	Mode = "Toggle",
-
-	NoUI = false,
-
 	Callback = function(Value)
 		Toggles.ToggleSpeed:SetValue(Value)
 		applySpeed()
@@ -153,11 +124,9 @@ Movement:AddToggle("ToggleSpeed", {
 MainSettings:AddSlider("SpeedSlider", {
 	Text = "Speed",
 	Default = DEFAULT_SPEED,
-	Tooltip = "Change your WalkSpeed value",
 	Min = 16,
 	Max = 500,
 	Rounding = 0,
-
 	Callback = function(v)
 		CurrentSpeedValue = v
 		applySpeed()
@@ -168,7 +137,6 @@ Movement:AddToggle("ToggleJumpPower", {
 	Text = "JumpPower",
 	Default = false,
 	Tooltip = "Makes your character jump higher",
-
 	Callback = function(Value)
 		ToggleJumpPowerEnabled = Value
 		applyJumpPower()
@@ -178,9 +146,6 @@ Movement:AddToggle("ToggleJumpPower", {
 	SyncToggleState = true,
 	Text = "JumpPower",
 	Mode = "Toggle",
-
-	NoUI = false,
-
 	Callback = function(Value)
 		Toggles.ToggleJumpPower:SetValue(Value)
 		applyJumpPower()
@@ -193,34 +158,16 @@ MainSettings:AddSlider("JumpPowerSlider", {
 	Min = 25,
 	Max = 500,
 	Rounding = 0,
-
 	Callback = function(v)
 		CurrentJumpPowerValue = v
 		applyJumpPower()
 	end,
 })
 
-game:GetService("RunService").Heartbeat:Connect(function()
-	if not Humanoid or Library.Unloaded then
-		return
-	end
-	if ToggleSpeedEnabled then
-		Humanoid.WalkSpeed = CurrentSpeedValue
-	end
-	if ToggleJumpPowerEnabled then
-		Humanoid.JumpPower = CurrentJumpPowerValue
-
-		Humanoid.JumpHeight = CurrentJumpPowerValue / 2.5
-	end
-end)
-
-local InfiniteJumpEnabled = false
-
 Movement:AddToggle("ToggleInfiniteJump", {
 	Text = "Infinite Jump",
 	Default = false,
 	Tooltip = 'Combine with "JumpPower" to jump higher',
-
 	Callback = function(v)
 		InfiniteJumpEnabled = v
 	end,
@@ -229,15 +176,26 @@ Movement:AddToggle("ToggleInfiniteJump", {
 	SyncToggleState = true,
 	Text = "Infinite Jump",
 	Mode = "Toggle",
-
-	NoUI = false,
-
 	Callback = function(Value)
 		Toggles.ToggleInfiniteJump:SetValue(Value)
 	end,
 })
 
-game:GetService("UserInputService").JumpRequest:Connect(function()
+-- Heartbeat for speed/jump
+RunService.Heartbeat:Connect(function()
+	if not Humanoid or Library.Unloaded then
+		return
+	end
+	if ToggleSpeedEnabled then
+		Humanoid.WalkSpeed = CurrentSpeedValue
+	end
+	if ToggleJumpPowerEnabled then
+		Humanoid.JumpPower = CurrentJumpPowerValue
+		Humanoid.JumpHeight = CurrentJumpPowerValue / 2.5
+	end
+end)
+
+UserInputService.JumpRequest:Connect(function()
 	if Library.Unloaded then
 		return
 	end
@@ -246,7 +204,11 @@ game:GetService("UserInputService").JumpRequest:Connect(function()
 	end
 end)
 
+-- ====================== AUTOFARM TAB ======================
 local function ApplyNoclip()
+	if not Character then
+		return
+	end
 	for _, part in ipairs(Character:GetDescendants()) do
 		if part:IsA("BasePart") then
 			part.CanCollide = false
@@ -255,6 +217,9 @@ local function ApplyNoclip()
 end
 
 local function RevertNoclip()
+	if not Character then
+		return
+	end
 	for _, part in ipairs(Character:GetDescendants()) do
 		if part:IsA("BasePart") then
 			part.CanCollide = true
@@ -263,42 +228,53 @@ local function RevertNoclip()
 end
 
 local function GetWeapon()
-	if not Character or not HumanoidRootPart then
+	if not Character then
 		return nil
 	end
-
-	for _, v in Character:GetDescendants() do
+	for _, v in ipairs(Character:GetDescendants()) do
 		if v:IsA("BoolValue") and v.Name == "Weapon" then
 			return v.Parent
 		end
 	end
-
-	return nil -- nothing found
+	return nil
 end
 
-local TabBox1 = Tabs.AutoFarm:AddLeftTabbox()
-local FarmTab = TabBox1:AddTab("Dungeon")
-local MainSettings1 = TabBox1:AddTab("Options")
-
-local AutoFarmEnabled = false
-local AntiFall = nil
+local function GetAbilities()
+	local tools = {}
+	local backpack = player:FindFirstChild("Backpack")
+	if backpack then
+		for _, item in ipairs(backpack:GetChildren()) do
+			if item:IsA("Tool") then
+				table.insert(tools, item)
+			end
+		end
+	end
+	if Character then
+		for _, item in ipairs(Character:GetChildren()) do
+			if item:IsA("Tool") then
+				table.insert(tools, item)
+			end
+		end
+	end
+	return tools
+end
 
 local function stopAutoFarm()
 	AutoFarmEnabled = false
+	AbilityLoopRunning = false
 
 	if Humanoid then
 		Humanoid.PlatformStand = false
 	end
-
 	if HumanoidRootPart and HumanoidRootPart:FindFirstChild("AntiFall") then
 		HumanoidRootPart.AntiFall:Destroy()
 	end
+	RevertNoclip()
 end
 
 local function getNearestMob()
 	local closest, closestDist = nil, math.huge
-	local myHRP = HumanoidRootPart
-	if not myHRP then
+	if not HumanoidRootPart then
 		return nil
 	end
 
@@ -307,10 +283,9 @@ local function getNearestMob()
 			local hrp = v.Parent:FindFirstChild("HumanoidRootPart")
 				or v.Parent:FindFirstChild("Torso")
 				or v.Parent:FindFirstChild("UpperTorso")
-
 			if hrp then
-				local dist = (hrp.Position - myHRP.Position).Magnitude
-				if dist < closestDist and dist < math.huge then -- max range
+				local dist = (hrp.Position - HumanoidRootPart.Position).Magnitude
+				if dist < closestDist then
 					closestDist = dist
 					closest = hrp
 				end
@@ -329,43 +304,20 @@ local function moveTo(targetCFrame, speed)
 		local current = HumanoidRootPart.CFrame
 		local distance = (current.Position - targetCFrame.Position).Magnitude
 
-		if distance < 4 then -- close enough
+		if distance < 4 then
 			HumanoidRootPart.CFrame = targetCFrame
 			break
 		end
 
-		-- Calculate how far to move this frame
-		local alpha = math.clamp((speed * task.wait()) / distance, 0, 1)
+		local dt = task.wait()
+		local alpha = math.clamp((speed * dt) / distance, 0, 1)
 		HumanoidRootPart.CFrame = current:Lerp(targetCFrame, alpha)
 	end
 end
 
-local AutoFarmEnabled = false
-local AbilityLoopRunning = false
-
-local function GetAbilities()
-	local tools = {}
-
-	local backpack = player:FindFirstChild("Backpack")
-	if backpack then
-		for _, item in ipairs(backpack:GetChildren()) do
-			if item:IsA("Tool") then
-				table.insert(tools, item)
-			end
-		end
-	end
-
-	local character = player.Character
-	if character then
-		for _, item in ipairs(character:GetChildren()) do
-			if item:IsA("Tool") then
-				table.insert(tools, item)
-			end
-		end
-	end
-
-	return tools
-end
+local TabBox1 = Tabs.AutoFarm:AddLeftTabbox()
+local FarmTab = TabBox1:AddTab("Dungeon")
+local FarmOptions = TabBox1:AddTab("Options")
 
 FarmTab:AddToggle("DungeonAutoFarmToggle", {
 	Text = "Dungeon AutoFarm",
@@ -377,13 +329,11 @@ FarmTab:AddToggle("DungeonAutoFarmToggle", {
 
 		if not Value then
 			stopAutoFarm()
-			RevertNoclip()
-			AbilityLoopRunning = false
 			return
 		end
 
 		if not HumanoidRootPart or not Humanoid then
-			Toggles.DungeonAutoFarm:SetValue(false)
+			Toggles.DungeonAutoFarmToggle:SetValue(false)
 			return
 		end
 
@@ -401,37 +351,21 @@ FarmTab:AddToggle("DungeonAutoFarmToggle", {
 		bv.MaxForce = Vector3.new(0, math.huge, 0)
 		bv.Parent = HumanoidRootPart
 
-		-- Ability loop (same pattern as your original)
+		-- Ability loop (fires abilityEvent inside each tool)
 		if not AbilityLoopRunning then
 			AbilityLoopRunning = true
 			task.spawn(function()
 				while AutoFarmEnabled and AbilityLoopRunning do
 					local Abilities = GetAbilities()
 
-					if #Abilities >= 1 then
-						local remote = game:GetService("ReplicatedStorage").remotes.abilityUsed
-
-						-- Same order you used originally
-						remote:FireServer("e", Abilities[1])
-						if Abilities[2] then
-							remote:FireServer("q", Abilities[2])
-							remote:FireServer("q", Abilities[1])
-							remote:FireServer("e", Abilities[2])
-						else
-							-- Only 1 ability found
-							remote:FireServer("q", Abilities[1])
-						end
-
-						-- Fire spellEvent on the tools if they have it
-						for _, tool in ipairs(Abilities) do
-							local spellEvent = tool:FindFirstChild("spellEvent")
-							if spellEvent then
-								spellEvent:FireServer()
-							end
+					for _, tool in ipairs(Abilities) do
+						local abilityEvent = tool:FindFirstChild("abilityEvent")
+						if abilityEvent and abilityEvent:IsA("RemoteEvent") then
+							abilityEvent:FireServer()
 						end
 					end
 
-					task.wait(1.5) -- adjust as needed
+					task.wait(1.5)
 				end
 				AbilityLoopRunning = false
 			end)
@@ -461,48 +395,42 @@ FarmTab:AddToggle("DungeonAutoFarmToggle", {
 	end,
 })
 
-MainSettings1:AddSlider("FarmSpeedSlider", {
+FarmOptions:AddSlider("FarmSpeedSlider", {
 	Text = "Farm Speed",
 	Default = DEFAULT_FARMSPEED,
 	Min = 100,
 	Max = 1000,
 	Rounding = 0,
-
 	Callback = function(v)
 		CurrentFarmSpeedValue = v
 	end,
 })
 
-MainSettings1:AddSlider("FarmYOffsetSlider", {
+FarmOptions:AddSlider("FarmYOffsetSlider", {
 	Text = "Farm Y Offset",
 	Default = DEFAULT_FARMYOFFSET,
 	Min = 1,
 	Max = 100,
 	Rounding = 0,
-
 	Callback = function(v)
 		CurrentFarmYOffset = v
 	end,
 })
 
-local RightTabBox = Tabs.AutoFarm:AddRightTabbox()
-
-------------------------------------------------------------------------------------------------------------------------------
+-- ====================== UI SETTINGS ======================
 Library:SetWatermarkVisibility(true)
 
 local FrameTimer = tick()
 local FrameCounter = 0
 local FPS = 60
 
-local WatermarkConnection = game:GetService("RunService").RenderStepped:Connect(function()
+local WatermarkConnection = RunService.RenderStepped:Connect(function()
 	FrameCounter += 1
-
 	if (tick() - FrameTimer) >= 1 then
 		FPS = FrameCounter
 		FrameTimer = tick()
 		FrameCounter = 0
 	end
-
 	Library:SetWatermark(
 		("Poke Hub | %s fps | %s ms"):format(
 			math.floor(FPS),
@@ -515,14 +443,12 @@ Library.KeybindFrame.Visible = true
 
 Library:OnUnload(function()
 	WatermarkConnection:Disconnect()
-
 	PLAYER_NAMETAG.Text = player.Name
-
 	if Humanoid then
 		Humanoid.JumpPower = DEFAULT_JUMPPOWER
 		Humanoid.WalkSpeed = DEFAULT_SPEED
 	end
-
+	stopAutoFarm()
 	Library.Unloaded = true
 end)
 
@@ -531,13 +457,16 @@ MenuGroup:AddButton("Unload", function()
 	Library:Unload()
 end)
 
-MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", { Default = "End", NoUI = false, Text = "Menu keybind" })
+MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", {
+	Default = "End",
+	NoUI = false,
+	Text = "Menu keybind",
+})
 
 Library.ToggleKeybind = Options.MenuKeybind
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
 SaveManager:IgnoreThemeSettings()
---SaveManager:SetIgnoreIndexes({ 'MenuKeybind' })
 ThemeManager:SetFolder("Project Poke")
 SaveManager:SetFolder("Project Poke/specific-game")
 SaveManager:BuildConfigSection(Tabs["UI Settings"])
