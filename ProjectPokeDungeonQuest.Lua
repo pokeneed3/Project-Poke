@@ -86,7 +86,7 @@ local MainSettings1 = RightTabBox:AddTab("Options")
 
 local ToggleStreamerMode = false
 
-Movement:AddToggle("ToggleStreamerMode", {
+General1:AddToggle("ToggleStreamerMode", {
 	Text = "StreamerMode",
 	Default = false,
 	Tooltip = "Hides your name",
