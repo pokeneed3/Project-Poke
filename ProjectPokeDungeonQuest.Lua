@@ -1,5 +1,8 @@
--- Player
+-- Services
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+
+-- Player
 local player = Players.LocalPlayer
 
 local PLAYER_NAMETAG = player.PlayerGui.playerStatus.Frame.playerName
@@ -273,90 +276,6 @@ local function GetWeapon()
 	return nil -- nothing found
 end
 
-local function GetQAbility()
-	local backpack = player:WaitForChild("Backpack")
-	local tools = {}
-
-	for _, item in ipairs(backpack:GetChildren()) do
-		if item:IsA("Tool") then
-			table.insert(tools, item)
-		end
-	end
-
-	return tools[1]
-end
-
-local function GetEAbility()
-	local backpack = player:WaitForChild("Backpack")
-	local tools = {}
-
-	for _, item in ipairs(backpack:GetChildren()) do
-		if item:IsA("Tool") then
-			table.insert(tools, item)
-		end
-	end
-
-	return tools[2]
-end
-
---[[
-
-local AbilityConfigs = {
-    -- Tool name = how to fire it
-    ["Whirlwind"] = {
-        UseAbilityRemote = true,          -- fires the shared abilityUsed remote
-        AbilityArg = "e",                 -- or "q"
-        ExtraArgs = {},                   -- extra args for abilityUsed if needed
-        HasSpellEvent = true,
-        SpellArgs = {},                   -- args for spellEvent:FireServer(...)
-    },
-    ["SomeOtherAbility"] = {
-        UseAbilityRemote = true,
-        AbilityArg = "e",
-        ExtraArgs = {"special"},          -- example of different args
-        HasSpellEvent = true,
-        SpellArgs = {true, 5},            -- different args
-    },
-    ["SimpleAbility"] = {
-        UseAbilityRemote = false,         -- this one only uses its own remote
-        HasSpellEvent = true,
-        SpellArgs = {},
-    },
-    -- add more as you discover them
-}
-
-local function fireAbility(toolName)
-    local tool = getSelectedTool(toolName)  -- your existing helper
-    if not tool then return end
-
-    local config = AbilityConfigs[toolName]
-    if not config then
-        -- fallback for unknown tools (your old generic method)
-        local remote = game:GetService("ReplicatedStorage").remotes.abilityUsed
-        remote:FireServer("e", tool)
-        local spellEvent = tool:FindFirstChild("spellEvent")
-        if spellEvent then
-            spellEvent:FireServer()
-        end
-        return
-    end
-
-    -- Use the config
-    if config.UseAbilityRemote then
-        local remote = game:GetService("ReplicatedStorage").remotes.abilityUsed
-        remote:FireServer(config.AbilityArg, tool, table.unpack(config.ExtraArgs or {}))
-    end
-
-    if config.HasSpellEvent then
-        local spellEvent = tool:FindFirstChild("spellEvent")
-        if spellEvent then
-            spellEvent:FireServer(table.unpack(config.SpellArgs or {}))
-        end
-    end
-end
-
-]]
-
 local TabBox1 = Tabs.AutoFarm:AddLeftTabbox()
 local FarmTab = TabBox1:AddTab("Dungeon")
 local MainSettings1 = TabBox1:AddTab("Options")
@@ -421,10 +340,37 @@ local function moveTo(targetCFrame, speed)
 	end
 end
 
-FarmTab:AddToggle("DungeonAutoFarm", {
+local AutoFarmEnabled = false
+local AbilityLoopRunning = false
+
+local function GetAbilities()
+	local tools = {}
+
+	local backpack = player:FindFirstChild("Backpack")
+	if backpack then
+		for _, item in ipairs(backpack:GetChildren()) do
+			if item:IsA("Tool") then
+				table.insert(tools, item)
+			end
+		end
+	end
+
+	local character = player.Character
+	if character then
+		for _, item in ipairs(character:GetChildren()) do
+			if item:IsA("Tool") then
+				table.insert(tools, item)
+			end
+		end
+	end
+
+	return tools
+end
+
+FarmTab:AddToggle("DungeonAutoFarmToggle", {
 	Text = "Dungeon AutoFarm",
 	Default = false,
-	Tooltip = "Starts / stops the dungeon farm",
+	Tooltip = "Auto farm + auto ability",
 
 	Callback = function(Value)
 		AutoFarmEnabled = Value
@@ -432,6 +378,7 @@ FarmTab:AddToggle("DungeonAutoFarm", {
 		if not Value then
 			stopAutoFarm()
 			RevertNoclip()
+			AbilityLoopRunning = false
 			return
 		end
 
@@ -446,7 +393,6 @@ FarmTab:AddToggle("DungeonAutoFarm", {
 		end
 
 		ApplyNoclip()
-
 		Humanoid.PlatformStand = true
 
 		local bv = Instance.new("BodyVelocity")
@@ -455,32 +401,50 @@ FarmTab:AddToggle("DungeonAutoFarm", {
 		bv.MaxForce = Vector3.new(0, math.huge, 0)
 		bv.Parent = HumanoidRootPart
 
-		-- Ability loop (runs only once)
-		task.spawn(function()
-			while AutoFarmEnabled do
-				local eTool = GetEAbility()
-				if eTool then
-					local remote = game:GetService("ReplicatedStorage").remotes.abilityUsed
-					remote:FireServer("e", eTool)
+		-- Ability loop (same pattern as your original)
+		if not AbilityLoopRunning then
+			AbilityLoopRunning = true
+			task.spawn(function()
+				while AutoFarmEnabled and AbilityLoopRunning do
+					local Abilities = GetAbilities()
 
-					local spellEvent = eTool:FindFirstChild("spellEvent")
-					if spellEvent then
-						spellEvent:FireServer()
+					if #Abilities >= 1 then
+						local remote = game:GetService("ReplicatedStorage").remotes.abilityUsed
+
+						-- Same order you used originally
+						remote:FireServer("e", Abilities[1])
+						if Abilities[2] then
+							remote:FireServer("q", Abilities[2])
+							remote:FireServer("q", Abilities[1])
+							remote:FireServer("e", Abilities[2])
+						else
+							-- Only 1 ability found
+							remote:FireServer("q", Abilities[1])
+						end
+
+						-- Fire spellEvent on the tools if they have it
+						for _, tool in ipairs(Abilities) do
+							local spellEvent = tool:FindFirstChild("spellEvent")
+							if spellEvent then
+								spellEvent:FireServer()
+							end
+						end
 					end
+
+					task.wait(1.5) -- adjust as needed
 				end
-				task.wait(2)
-			end
-		end)
+				AbilityLoopRunning = false
+			end)
+		end
 
 		-- Main farm loop
 		task.spawn(function()
 			while AutoFarmEnabled do
 				local target = getNearestMob()
-				if target then
+				if target and target.Parent and HumanoidRootPart then
 					local goal = target.CFrame * CFrame.new(0, CurrentFarmYOffset, 0)
-					moveTo(goal, CurrentFarmSpeedValue) -- studs per second
+					moveTo(goal, CurrentFarmSpeedValue)
 
-					-- Look down + attack only if still enabled
 					if AutoFarmEnabled and HumanoidRootPart then
 						HumanoidRootPart.CFrame =
 							CFrame.lookAt(HumanoidRootPart.Position, HumanoidRootPart.Position - Vector3.new(0, 5, 0))
