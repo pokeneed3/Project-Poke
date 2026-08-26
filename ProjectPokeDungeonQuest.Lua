@@ -6,9 +6,19 @@ local UserInputService = game:GetService("UserInputService")
 
 -- Player
 local player = Players.LocalPlayer
-local PLAYER_NAMETAG = player.PlayerGui.playerStatus.Frame.playerName
+local playerGui = player:WaitForChild("PlayerGui")
+local PLAYER_NAMETAG = playerGui:WaitForChild("playerStatus"):WaitForChild("Frame"):WaitForChild("playerName")
 
 local Character, Humanoid, HumanoidRootPart
+
+local OriginalCollision = {}
+
+local FarmLoopRunning = false
+local Connections = {}
+
+local ApplyNoclip
+local RevertNoclip
+local stopAutoFarm
 
 local DEFAULT_SPEED = 16
 local DEFAULT_JUMPPOWER = 25
@@ -42,6 +52,7 @@ local function applyJumpPower()
 end
 
 -- Character handling
+
 local function onCharacterAdded(char)
 	Character = char
 	Humanoid = char:WaitForChild("Humanoid")
@@ -58,13 +69,16 @@ end
 if player.Character then
 	onCharacterAdded(player.Character)
 end
-player.CharacterAdded:Connect(onCharacterAdded)
+Connections = player.CharacterAdded:Connect(onCharacterAdded)
 
-player.CharacterRemoving:Connect(function()
+Connections = player.CharacterRemoving:Connect(function()
 	Character = nil
 	Humanoid = nil
 	HumanoidRootPart = nil
 end)
+
+local playerNameplate = Character and Character:WaitForChild("playerNameplate")
+local playerNameplateText = playerNameplate and playerNameplate:WaitForChild("Frame"):WaitForChild("name")
 
 -- Library
 local repo = "https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/"
@@ -103,8 +117,10 @@ General1:AddToggle("ToggleStreamerMode", {
 	Callback = function(Value)
 		if Value then
 			PLAYER_NAMETAG.Text = "Project Poke"
+			playerNameplateText.Text = "Project Poke"
 		else
 			PLAYER_NAMETAG.Text = player.Name
+			playerNameplateText.Text = player.Name
 		end
 	end,
 })
@@ -189,7 +205,7 @@ Movement:AddToggle("ToggleInfiniteJump", {
 })
 
 -- Heartbeat for speed/jump
-RunService.Heartbeat:Connect(function()
+Connections = RunService.Heartbeat:Connect(function()
 	if not Humanoid or Library.Unloaded then
 		return
 	end
@@ -202,39 +218,52 @@ RunService.Heartbeat:Connect(function()
 	end
 end)
 
-UserInputService.JumpRequest:Connect(function()
+Connections = UserInputService.JumpRequest:Connect(function()
 	if Library.Unloaded then
 		return
 	end
+
 	if InfiniteJumpEnabled and Humanoid then
 		Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
 	end
 end)
 
 -- ====================== AUTOFARM TAB ======================
+
 function ApplyNoclip()
 	if not Character then
 		return
 	end
+
 	for _, part in ipairs(Character:GetDescendants()) do
 		if part:IsA("BasePart") then
+			if OriginalCollision[part] == nil then
+				OriginalCollision[part] = part.CanCollide
+			end
 			part.CanCollide = false
 		end
 	end
 end
 
 function RevertNoclip()
-	if not Character then
-		return
-	end
-	for _, part in ipairs(Character:GetDescendants()) do
-		if part:IsA("BasePart") then
-			part.CanCollide = true
+	for part, originalValue in pairs(OriginalCollision) do
+		if part and part.Parent then
+			part.CanCollide = originalValue
 		end
+		OriginalCollision[part] = nil
 	end
 end
 
-function GetWeapon()
+local function StandCharacter()
+	if not Humanoid or Humanoid.Health <= 0 then
+		return
+	end
+
+	Humanoid.PlatformStand = false
+	Humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+end
+
+local function GetWeapon()
 	if not Character then
 		return nil
 	end
@@ -246,7 +275,7 @@ function GetWeapon()
 	return nil
 end
 
-function GetAbilities()
+local function GetAbilities()
 	local tools = {}
 	local backpack = player:FindFirstChild("Backpack")
 	if backpack then
@@ -276,10 +305,15 @@ function stopAutoFarm()
 	if HumanoidRootPart and HumanoidRootPart:FindFirstChild("AntiFall") then
 		HumanoidRootPart.AntiFall:Destroy()
 	end
+
+	FarmLoopRunning = false
 	RevertNoclip()
+	StandCharacter()
 end
 
-function getNearestMob()
+-- ====================== AUTOFARM LOGIC ======================
+
+local function getNearestMob()
 	local closest, closestDist = nil, math.huge
 	if not HumanoidRootPart then
 		return nil
@@ -302,7 +336,7 @@ function getNearestMob()
 	return closest
 end
 
-function moveTo(targetCFrame, speed)
+local function moveTo(targetCFrame, speed)
 	if not HumanoidRootPart then
 		return
 	end
@@ -378,6 +412,12 @@ FarmTab:AddToggle("DungeonAutoFarmToggle", {
 			end)
 		end
 
+		if FarmLoopRunning then
+			return
+		end
+
+		FarmLoopRunning = true
+
 		-- Main farm loop
 		task.spawn(function()
 			while AutoFarmEnabled do
@@ -398,6 +438,7 @@ FarmTab:AddToggle("DungeonAutoFarmToggle", {
 				end
 				task.wait(0.1)
 			end
+			FarmLoopRunning = false
 		end)
 	end,
 })
@@ -451,18 +492,34 @@ Library.KeybindFrame.Visible = true
 Library:OnUnload(function()
 	WatermarkConnection:Disconnect()
 	PLAYER_NAMETAG.Text = player.Name
+	playerNameplateText.Text = player.Name
+
 	if Humanoid then
 		Humanoid.JumpPower = DEFAULT_JUMPPOWER
 		Humanoid.WalkSpeed = DEFAULT_SPEED
 	end
+
+	task.spawn(function()
+		for _, connection in Connections do
+			if connection then
+				connection:Disconnect()
+			end
+		end
+	end)
+
 	stopAutoFarm()
 	Library.Unloaded = true
 end)
 
 local MenuGroup = Tabs["UI Settings"]:AddLeftGroupbox("Menu")
-MenuGroup:AddButton("Unload", function()
-	Library:Unload()
-end)
+MenuGroup:AddButton({
+	Text = "Unload",
+	Tooltip = "Unload the UI",
+	DoubleClick = true,
+	Func = function()
+		Library:Unload()
+	end,
+})
 
 MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", {
 	Default = "End",
@@ -470,7 +527,6 @@ MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", {
 	Text = "Menu keybind",
 })
 
-Library.ShowSearch = true
 Library.ToggleKeybind = Options.MenuKeybind
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
@@ -480,12 +536,3 @@ SaveManager:SetFolder("Project Poke/specific-game")
 SaveManager:BuildConfigSection(Tabs["UI Settings"])
 ThemeManager:ApplyToTab(Tabs["UI Settings"])
 SaveManager:LoadAutoloadConfig()
-
--- Auto execute on teleport
-local success, err = pcall(function()
-	queue_on_teleport([[
-	loadstring(
-		game:HttpGet("https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/ProjectPokeDungeonQuest.Lua")
-	)()
-	]])
-end)
