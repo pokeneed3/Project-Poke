@@ -48,6 +48,11 @@ local function onCharacterAdded(char)
 	HumanoidRootPart = char:WaitForChild("HumanoidRootPart")
 	applySpeed()
 	applyJumpPower()
+
+	if AutoFarmEnabled then
+		Humanoid.PlatformStand = true
+		ApplyNoclip()
+	end
 end
 
 if player.Character then
@@ -74,6 +79,8 @@ local Window = Library:CreateWindow({
 	TabPadding = 8,
 	MenuFadeTime = 0,
 })
+
+Library.ShowSearch = true
 
 local Tabs = {
 	Main = Window:AddTab("Main"),
@@ -205,7 +212,7 @@ UserInputService.JumpRequest:Connect(function()
 end)
 
 -- ====================== AUTOFARM TAB ======================
-local function ApplyNoclip()
+function ApplyNoclip()
 	if not Character then
 		return
 	end
@@ -216,7 +223,7 @@ local function ApplyNoclip()
 	end
 end
 
-local function RevertNoclip()
+function RevertNoclip()
 	if not Character then
 		return
 	end
@@ -227,7 +234,7 @@ local function RevertNoclip()
 	end
 end
 
-local function GetWeapon()
+function GetWeapon()
 	if not Character then
 		return nil
 	end
@@ -239,7 +246,7 @@ local function GetWeapon()
 	return nil
 end
 
-local function GetAbilities()
+function GetAbilities()
 	local tools = {}
 	local backpack = player:FindFirstChild("Backpack")
 	if backpack then
@@ -259,7 +266,7 @@ local function GetAbilities()
 	return tools
 end
 
-local function stopAutoFarm()
+function stopAutoFarm()
 	AutoFarmEnabled = false
 	AbilityLoopRunning = false
 
@@ -272,7 +279,7 @@ local function stopAutoFarm()
 	RevertNoclip()
 end
 
-local function getNearestMob()
+function getNearestMob()
 	local closest, closestDist = nil, math.huge
 	if not HumanoidRootPart then
 		return nil
@@ -295,7 +302,7 @@ local function getNearestMob()
 	return closest
 end
 
-local function moveTo(targetCFrame, speed)
+function moveTo(targetCFrame, speed)
 	if not HumanoidRootPart then
 		return
 	end
@@ -322,7 +329,7 @@ local FarmOptions = TabBox1:AddTab("Options")
 FarmTab:AddToggle("DungeonAutoFarmToggle", {
 	Text = "Dungeon AutoFarm",
 	Default = false,
-	Tooltip = "Auto farm + auto ability",
+	Tooltip = "Auto farm + Auto ability",
 
 	Callback = function(Value)
 		AutoFarmEnabled = Value
@@ -463,6 +470,7 @@ MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", {
 	Text = "Menu keybind",
 })
 
+Library.ShowSearch = true
 Library.ToggleKeybind = Options.MenuKeybind
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
@@ -472,3 +480,12 @@ SaveManager:SetFolder("Project Poke/specific-game")
 SaveManager:BuildConfigSection(Tabs["UI Settings"])
 ThemeManager:ApplyToTab(Tabs["UI Settings"])
 SaveManager:LoadAutoloadConfig()
+
+-- Auto execute on teleport
+local success, err = pcall(function()
+	queue_on_teleport([[
+	loadstring(
+		game:HttpGet("https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/ProjectPokeDungeonQuest.Lua")
+	)()
+	]])
+end)
