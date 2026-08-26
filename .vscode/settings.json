@@ -1,3 +1,10 @@
 {
-    "luau-lsp.studioPlugin.enabled": true
+    "luau-lsp.studioPlugin.enabled": true,
+
+    "files.exclude": {
+        "**/*": true,
+        "**/*.lua": false,
+        "**/.vscode": false,
+        "**/selene.toml": false
+    }
 }
