@@ -36,7 +36,24 @@ local AutoFarmEnabled = false
 local AbilityLoopRunning = false
 local InfiniteJumpEnabled = false
 
--- Speed / Jump
+-- Important Functions
+
+local function trackConnection(connection)
+	table.insert(Connections, connection)
+	return connection
+end
+
+local function disconnectAllConnections()
+	for _, connection in ipairs(Connections) do
+		if connection then
+			connection:Disconnect()
+		end
+	end
+	Connections = {}
+end
+
+-- Character handling
+
 local function applySpeed()
 	local hum = Humanoid or (Character and Character:FindFirstChildOfClass("Humanoid"))
 	if hum then
@@ -50,8 +67,6 @@ local function applyJumpPower()
 		hum.JumpPower = ToggleJumpPowerEnabled and CurrentJumpPowerValue or DEFAULT_JUMPPOWER
 	end
 end
-
--- Character handling
 
 local function onCharacterAdded(char)
 	Character = char
@@ -69,13 +84,13 @@ end
 if player.Character then
 	onCharacterAdded(player.Character)
 end
-Connections = player.CharacterAdded:Connect(onCharacterAdded)
+trackConnection(player.CharacterAdded:Connect(onCharacterAdded))
 
-Connections = player.CharacterRemoving:Connect(function()
+trackConnection(player.CharacterRemoving:Connect(function()
 	Character = nil
 	Humanoid = nil
 	HumanoidRootPart = nil
-end)
+end))
 
 local playerNameplate = Character and Character:WaitForChild("playerNameplate")
 local playerNameplateText = playerNameplate and playerNameplate:WaitForChild("Frame"):WaitForChild("name")
@@ -205,7 +220,7 @@ Movement:AddToggle("ToggleInfiniteJump", {
 })
 
 -- Heartbeat for speed/jump
-Connections = RunService.Heartbeat:Connect(function()
+trackConnection(RunService.Heartbeat:Connect(function()
 	if not Humanoid or Library.Unloaded then
 		return
 	end
@@ -216,9 +231,9 @@ Connections = RunService.Heartbeat:Connect(function()
 		Humanoid.JumpPower = CurrentJumpPowerValue
 		Humanoid.JumpHeight = CurrentJumpPowerValue / 2.5
 	end
-end)
+end))
 
-Connections = UserInputService.JumpRequest:Connect(function()
+trackConnection(UserInputService.JumpRequest:Connect(function()
 	if Library.Unloaded then
 		return
 	end
@@ -226,7 +241,7 @@ Connections = UserInputService.JumpRequest:Connect(function()
 	if InfiniteJumpEnabled and Humanoid then
 		Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
 	end
-end)
+end))
 
 -- ====================== AUTOFARM TAB ======================
 
@@ -472,7 +487,7 @@ local FrameTimer = tick()
 local FrameCounter = 0
 local FPS = 60
 
-local WatermarkConnection = RunService.RenderStepped:Connect(function()
+trackConnection(RunService.RenderStepped:Connect(function()
 	FrameCounter += 1
 	if (tick() - FrameTimer) >= 1 then
 		FPS = FrameCounter
@@ -485,12 +500,11 @@ local WatermarkConnection = RunService.RenderStepped:Connect(function()
 			math.floor(game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue())
 		)
 	)
-end)
+end))
 
 Library.KeybindFrame.Visible = true
 
 Library:OnUnload(function()
-	WatermarkConnection:Disconnect()
 	PLAYER_NAMETAG.Text = player.Name
 	playerNameplateText.Text = player.Name
 
@@ -499,13 +513,7 @@ Library:OnUnload(function()
 		Humanoid.WalkSpeed = DEFAULT_SPEED
 	end
 
-	task.spawn(function()
-		for _, connection in Connections do
-			if connection then
-				connection:Disconnect()
-			end
-		end
-	end)
+	disconnectAllConnections()
 
 	stopAutoFarm()
 	Library.Unloaded = true
