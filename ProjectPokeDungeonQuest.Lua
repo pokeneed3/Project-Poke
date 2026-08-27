@@ -535,7 +535,8 @@ MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", {
 	Text = "Menu keybind",
 })
 
-Library.ToggleKeybind = Options.MenuKeybind
+Library:Notify('Project Poke Loaded Press "End" to open the menu', 5)
+
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
 SaveManager:IgnoreThemeSettings()
