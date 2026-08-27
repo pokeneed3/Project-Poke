@@ -1,5 +1,4 @@
 -- Services
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -10,6 +9,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 local PLAYER_NAMETAG = playerGui:WaitForChild("playerStatus"):WaitForChild("Frame"):WaitForChild("playerName")
 
 local Character, Humanoid, HumanoidRootPart
+local playerNameplateText
 
 local OriginalCollision = {}
 
@@ -35,6 +35,7 @@ local CurrentFarmYOffset = DEFAULT_FARMYOFFSET
 local AutoFarmEnabled = false
 local AbilityLoopRunning = false
 local InfiniteJumpEnabled = false
+local StreamerModeEnabled = false
 
 -- Important Functions
 
@@ -72,6 +73,12 @@ local function onCharacterAdded(char)
 	Character = char
 	Humanoid = char:WaitForChild("Humanoid")
 	HumanoidRootPart = char:WaitForChild("HumanoidRootPart")
+	local playerNameplate = char:FindFirstChild("playerNameplate")
+	local nameplateFrame = playerNameplate and playerNameplate:FindFirstChild("Frame")
+	playerNameplateText = nameplateFrame and nameplateFrame:FindFirstChild("name")
+	if StreamerModeEnabled and playerNameplateText then
+		playerNameplateText.Text = "Project Poke"
+	end
 	applySpeed()
 	applyJumpPower()
 
@@ -90,10 +97,8 @@ trackConnection(player.CharacterRemoving:Connect(function()
 	Character = nil
 	Humanoid = nil
 	HumanoidRootPart = nil
+	playerNameplateText = nil
 end))
-
-local playerNameplate = Character and Character:WaitForChild("playerNameplate")
-local playerNameplateText = playerNameplate and playerNameplate:WaitForChild("Frame"):WaitForChild("name")
 
 -- Library
 local repo = "https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/"
@@ -130,12 +135,17 @@ General1:AddToggle("ToggleStreamerMode", {
 	Default = false,
 	Tooltip = "Hides your name",
 	Callback = function(Value)
+		StreamerModeEnabled = Value
 		if Value then
 			PLAYER_NAMETAG.Text = "Project Poke"
-			playerNameplateText.Text = "Project Poke"
+			if playerNameplateText then
+				playerNameplateText.Text = "Project Poke"
+			end
 		else
 			PLAYER_NAMETAG.Text = player.Name
-			playerNameplateText.Text = player.Name
+			if playerNameplateText then
+				playerNameplateText.Text = player.Name
+			end
 		end
 	end,
 })
@@ -506,7 +516,9 @@ Library.KeybindFrame.Visible = true
 
 Library:OnUnload(function()
 	PLAYER_NAMETAG.Text = player.Name
-	playerNameplateText.Text = player.Name
+	if playerNameplateText then
+		playerNameplateText.Text = player.Name
+	end
 
 	if Humanoid then
 		Humanoid.JumpPower = DEFAULT_JUMPPOWER
