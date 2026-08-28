@@ -450,6 +450,11 @@ FarmTab:AddToggle("DungeonAutoFarmToggle", {
 						if abilityEvent and abilityEvent:IsA("RemoteEvent") then
 							abilityEvent:FireServer()
 						end
+
+						local spellEvent = tool:FindFirstChild("spellEvent")
+						if spellEvent and spellEvent:IsA("RemoteEvent") then
+							spellEvent:FireServer()
+						end
 					end
 
 					task.wait(1.5)
