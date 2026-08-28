@@ -53,6 +53,12 @@ local function disconnectAllConnections()
 	Connections = {}
 end
 
+local function rejoinGame()
+	local TeleportService = game:GetService("TeleportService")
+	local PlaceId = game.PlaceId
+	TeleportService:Teleport(PlaceId, player)
+end
+
 -- Character handling
 
 local function applySpeed()
@@ -101,7 +107,7 @@ trackConnection(player.CharacterRemoving:Connect(function()
 end))
 
 -- Library
-local repo = "https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/"
+local repo = "https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/LinoriaLib/"
 local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
 local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
 local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
@@ -125,10 +131,23 @@ local Tabs = {
 -- ====================== MAIN TAB ======================
 local TabBox = Tabs.Main:AddLeftTabbox()
 local Movement = TabBox:AddTab("Movement")
-local MainSettings = TabBox:AddTab("Options")
+local MainSettings = TabBox:AddTab("Settings")
+
+local ServerTabbox = Tabs.Main:AddLeftTabbox()
+local MainTabbox = ServerTabbox:AddTab("Main")
+local MainSettingsServer = ServerTabbox:AddTab("Settings")
 
 local RightTabBox = Tabs.Main:AddRightTabbox()
 local General1 = RightTabBox:AddTab("General")
+
+MainTabbox:AddButton({
+	Text = "Rejoin",
+	Tooltip = "Rejoins the game",
+	DoubleClick = true,
+	Func = function()
+		rejoinGame()
+	end,
+})
 
 General1:AddToggle("ToggleStreamerMode", {
 	Text = "StreamerMode",
@@ -234,9 +253,11 @@ trackConnection(RunService.Heartbeat:Connect(function()
 	if not Humanoid or Library.Unloaded then
 		return
 	end
+
 	if ToggleSpeedEnabled then
 		Humanoid.WalkSpeed = CurrentSpeedValue
 	end
+
 	if ToggleJumpPowerEnabled then
 		Humanoid.JumpPower = CurrentJumpPowerValue
 		Humanoid.JumpHeight = CurrentJumpPowerValue / 2.5
@@ -472,7 +493,7 @@ FarmOptions:AddSlider("FarmSpeedSlider", {
 	Text = "Farm Speed",
 	Default = DEFAULT_FARMSPEED,
 	Min = 100,
-	Max = 1000,
+	Max = 4000,
 	Rounding = 0,
 	Callback = function(v)
 		CurrentFarmSpeedValue = v
@@ -546,10 +567,10 @@ MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", {
 	NoUI = false,
 	Text = "Menu keybind",
 })
+
+--Library:Notify('Project Poke Loaded Press "End" to open the menu', 5)
+
 Library.ToggleKeybind = Options.MenuKeybind
-
-Library:Notify('Project Poke Loaded Press "End" to open the menu', 5)
-
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
 SaveManager:IgnoreThemeSettings()

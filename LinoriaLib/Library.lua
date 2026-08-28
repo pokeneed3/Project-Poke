@@ -793,14 +793,11 @@ do
 			ContextMenu:AddOption("Copy RGB", function()
 				pcall(
 					setclipboard,
-					table.concat(
-						{
-							math.floor(ColorPicker.Value.R * 255),
-							math.floor(ColorPicker.Value.G * 255),
-							math.floor(ColorPicker.Value.B * 255),
-						},
-						", "
-					)
+					table.concat({
+						math.floor(ColorPicker.Value.R * 255),
+						math.floor(ColorPicker.Value.G * 255),
+						math.floor(ColorPicker.Value.B * 255),
+					}, ", ")
 				)
 				Library:Notify("Copied RGB values to clipboard!", 2)
 			end)
@@ -868,14 +865,11 @@ do
 			HueCursor.Position = UDim2.new(0, 0, ColorPicker.Hue, 0)
 
 			HueBox.Text = "#" .. ColorPicker.Value:ToHex()
-			RgbBox.Text = table.concat(
-				{
-					math.floor(ColorPicker.Value.R * 255),
-					math.floor(ColorPicker.Value.G * 255),
-					math.floor(ColorPicker.Value.B * 255),
-				},
-				", "
-			)
+			RgbBox.Text = table.concat({
+				math.floor(ColorPicker.Value.R * 255),
+				math.floor(ColorPicker.Value.G * 255),
+				math.floor(ColorPicker.Value.B * 255),
+			}, ", ")
 
 			Library:SafeCallback(ColorPicker.Callback, ColorPicker.Value)
 			Library:SafeCallback(ColorPicker.Changed, ColorPicker.Value)
@@ -3569,7 +3563,7 @@ function Library:CreateWindow(...)
 		local FadeTime = Config.MenuFadeTime
 		Fading = true
 		Toggled = not Toggled
-		ModalElement.Modal = Toggled
+		ModalElement.Modal = false
 
 		if Toggled then
 			-- A bit scuffed, but if we're going from not toggled -> toggled we want to show the frame immediately so that the fade is visible.
