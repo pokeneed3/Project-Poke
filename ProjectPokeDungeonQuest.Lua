@@ -13,11 +13,12 @@ local playerNameplateText
 
 local OriginalCollision = {}
 
+local DungeonStarted = workspace.dungeonStarted
 local FarmLoopRunning = false
 local Connections = {}
 
-local ApplyNoclip
-local RevertNoclip
+local removeNoclip
+local applyNoclip
 local stopAutoFarm
 
 local DEFAULT_SPEED = 16
@@ -27,12 +28,14 @@ local DEFAULT_FARMYOFFSET = 11
 
 local ToggleSpeedEnabled = false
 local ToggleJumpPowerEnabled = false
+local ToggleSwingEnabled = true
 local CurrentSpeedValue = DEFAULT_SPEED
 local CurrentJumpPowerValue = DEFAULT_JUMPPOWER
 local CurrentFarmSpeedValue = DEFAULT_FARMSPEED
 local CurrentFarmYOffset = DEFAULT_FARMYOFFSET
 
 local AutoFarmEnabled = false
+local FarmPaused = true
 local AbilityLoopRunning = false
 local InfiniteJumpEnabled = false
 local StreamerModeEnabled = false
@@ -90,7 +93,7 @@ local function onCharacterAdded(char)
 
 	if AutoFarmEnabled then
 		Humanoid.PlatformStand = true
-		ApplyNoclip()
+		applyNoclip()
 	end
 end
 
@@ -105,6 +108,28 @@ trackConnection(player.CharacterRemoving:Connect(function()
 	HumanoidRootPart = nil
 	playerNameplateText = nil
 end))
+
+local original = {}
+
+function applyNoclip()
+	for _, part in ipairs(Character:GetDescendants()) do
+		if part:IsA("BasePart") then
+			if original[part] == nil then
+				original[part] = part.CanCollide
+			end
+			part.CanCollide = false
+		end
+	end
+end
+
+function removeNoclip()
+	for part, value in pairs(original) do
+		if part and part.Parent then
+			part.CanCollide = value
+		end
+		original[part] = nil
+	end
+end
 
 -- Library
 local repo = "https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/LinoriaLib/"
@@ -133,14 +158,18 @@ local TabBox = Tabs.Main:AddLeftTabbox()
 local Movement = TabBox:AddTab("Movement")
 local MainSettings = TabBox:AddTab("Settings")
 
-local ServerTabbox = Tabs.Main:AddLeftTabbox()
-local MainTabbox = ServerTabbox:AddTab("Main")
-local MainSettingsServer = ServerTabbox:AddTab("Settings")
-
 local RightTabBox = Tabs.Main:AddRightTabbox()
 local General1 = RightTabBox:AddTab("General")
 
-MainTabbox:AddButton({
+local ServerTabbox = Tabs.Main:AddLeftTabbox()
+local MainServerTab = ServerTabbox:AddTab("Main")
+local MainSettingsServer = ServerTabbox:AddTab("Settings")
+
+local TabBox1 = Tabs.AutoFarm:AddLeftTabbox()
+local FarmTab = TabBox1:AddTab("Dungeon")
+local FarmOptions = TabBox1:AddTab("Options")
+
+MainServerTab:AddButton({
 	Text = "Rejoin",
 	Tooltip = "Rejoins the game",
 	DoubleClick = true,
@@ -276,30 +305,6 @@ end))
 
 -- ====================== AUTOFARM TAB ======================
 
-function ApplyNoclip()
-	if not Character then
-		return
-	end
-
-	for _, part in ipairs(Character:GetDescendants()) do
-		if part:IsA("BasePart") then
-			if OriginalCollision[part] == nil then
-				OriginalCollision[part] = part.CanCollide
-			end
-			part.CanCollide = false
-		end
-	end
-end
-
-function RevertNoclip()
-	for part, originalValue in pairs(OriginalCollision) do
-		if part and part.Parent then
-			part.CanCollide = originalValue
-		end
-		OriginalCollision[part] = nil
-	end
-end
-
 local function StandCharacter()
 	if not Humanoid or Humanoid.Health <= 0 then
 		return
@@ -353,7 +358,7 @@ function stopAutoFarm()
 	end
 
 	FarmLoopRunning = false
-	RevertNoclip()
+	removeNoclip()
 	StandCharacter()
 end
 
@@ -402,10 +407,6 @@ local function moveTo(targetCFrame, speed)
 	end
 end
 
-local TabBox1 = Tabs.AutoFarm:AddLeftTabbox()
-local FarmTab = TabBox1:AddTab("Dungeon")
-local FarmOptions = TabBox1:AddTab("Options")
-
 FarmTab:AddToggle("DungeonAutoFarmToggle", {
 	Text = "Dungeon AutoFarm",
 	Default = false,
@@ -429,7 +430,7 @@ FarmTab:AddToggle("DungeonAutoFarmToggle", {
 			HumanoidRootPart.AntiFall:Destroy()
 		end
 
-		ApplyNoclip()
+		applyNoclip()
 		Humanoid.PlatformStand = true
 
 		local bv = Instance.new("BodyVelocity")
@@ -438,7 +439,7 @@ FarmTab:AddToggle("DungeonAutoFarmToggle", {
 		bv.MaxForce = Vector3.new(0, math.huge, 0)
 		bv.Parent = HumanoidRootPart
 
-		-- Ability loop (fires abilityEvent inside each tool)
+		-- Ability loop (fires abilityEvent and spellEvent inside each tool)
 		if not AbilityLoopRunning then
 			AbilityLoopRunning = true
 			task.spawn(function()
@@ -457,7 +458,7 @@ FarmTab:AddToggle("DungeonAutoFarmToggle", {
 						end
 					end
 
-					task.wait(1.5)
+					task.wait(0.5)
 				end
 				AbilityLoopRunning = false
 			end)
@@ -472,6 +473,28 @@ FarmTab:AddToggle("DungeonAutoFarmToggle", {
 		-- Main farm loop
 		task.spawn(function()
 			while AutoFarmEnabled do
+				local StartEvent = game:GetService("ReplicatedStorage").remotes.changeStartValue
+
+				if workspace.start.Value ~= true then
+					StartEvent:FireServer()
+
+					repeat
+						task.wait(0.1)
+					until workspace.start.Value == true or not AutoFarmEnabled
+
+					if AutoFarmEnabled then
+						task.wait(5)
+						FarmPaused = false
+						print("Dungeon started, resuming auto farm")
+					end
+				end
+
+				while FarmPaused and AutoFarmEnabled do
+					task.wait(0.1)
+				end
+
+				-- target and farm logic here
+
 				local target = getNearestMob()
 				if target and target.Parent and HumanoidRootPart then
 					local goal = target.CFrame * CFrame.new(0, CurrentFarmYOffset, 0)
@@ -482,12 +505,12 @@ FarmTab:AddToggle("DungeonAutoFarmToggle", {
 							CFrame.lookAt(HumanoidRootPart.Position, HumanoidRootPart.Position - Vector3.new(0, 5, 0))
 
 						local weapon = GetWeapon()
-						if weapon and weapon:FindFirstChild("swing") then
+						if weapon and ToggleSwingEnabled and weapon:FindFirstChild("swing") then
 							weapon.swing:FireServer()
 						end
 					end
 				end
-				task.wait(0.1)
+				task.wait(0.05)
 			end
 			FarmLoopRunning = false
 		end)
@@ -580,7 +603,7 @@ ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
 SaveManager:IgnoreThemeSettings()
 ThemeManager:SetFolder("Project Poke")
-SaveManager:SetFolder("Project Poke/specific-game")
+SaveManager:SetFolder("Project Poke/Dungeon Quest Reborn")
 SaveManager:BuildConfigSection(Tabs["UI Settings"])
 ThemeManager:ApplyToTab(Tabs["UI Settings"])
 SaveManager:LoadAutoloadConfig()
