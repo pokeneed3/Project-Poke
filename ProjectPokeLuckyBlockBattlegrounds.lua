@@ -3,6 +3,7 @@ local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local Stats = game:GetService("Stats")
 local HttpService = game:GetService("HttpService")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
@@ -13,6 +14,12 @@ local Connections = {}
 local SavedPositions = {
 	["Base"] = nil,
 }
+
+local ToggleSpeedEnabled = false
+local ToggleJumpPowerEnabled = false
+local CurrentSpeedValue = 16
+local CurrentJumpPowerValue = 50
+local InfiniteJumpEnabled = false
 
 -- Main Functions
 
@@ -36,6 +43,20 @@ local function updateCharacter(newCharacter)
 end
 
 trackConnection(player.CharacterAdded:Connect(updateCharacter))
+
+local function applySpeed()
+	local hum = character:FindFirstChildOfClass("Humanoid")
+	if hum then
+		hum.WalkSpeed = ToggleSpeedEnabled and CurrentSpeedValue
+	end
+end
+
+local function applyJumpPower()
+	local hum = character:FindFirstChildOfClass("Humanoid")
+	if hum then
+		hum.JumpPower = ToggleJumpPowerEnabled and CurrentJumpPowerValue
+	end
+end
 
 -- Library
 local repo = "https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/LinoriaLib/"
@@ -73,7 +94,7 @@ General:AddButton({
 		local Event = game:GetService("ReplicatedStorage").SpawnGalaxyBlock
 
 		task.spawn(function()
-			for _ = 1, 100 do
+			for _ = 1, 150 do
 				Event:FireServer()
 				task.wait()
 			end
@@ -116,6 +137,112 @@ General:AddLabel("Keybind"):AddKeyPicker("TeleportKeyPicker", {
 	end,
 })
 
+MainSettings:AddToggle("ToggleSpeed", {
+	Text = "Speed",
+	Default = false,
+	Tooltip = "Makes your character move faster",
+	Callback = function(Value)
+		ToggleSpeedEnabled = Value
+		applySpeed()
+	end,
+}):AddKeyPicker("SpeedKeyPicker", {
+	Default = "F1",
+	SyncToggleState = true,
+	Text = "Speed",
+	Mode = "Toggle",
+	Callback = function(Value)
+		Toggles.ToggleSpeed:SetValue(Value)
+		applySpeed()
+	end,
+})
+
+MainSettings:AddSlider("SpeedSlider", {
+	Text = "Speed",
+	Default = 16,
+	Min = 16,
+	Max = 300,
+	Rounding = 0,
+	Callback = function(v)
+		CurrentSpeedValue = v
+		applySpeed()
+	end,
+})
+
+MainSettings:AddToggle("ToggleJumpPower", {
+	Text = "JumpPower",
+	Default = false,
+	Tooltip = "Makes your character jump higher",
+	Callback = function(Value)
+		ToggleJumpPowerEnabled = Value
+		applyJumpPower()
+	end,
+}):AddKeyPicker("JumpPowerKeyPicker", {
+	Default = "F2",
+	SyncToggleState = true,
+	Text = "JumpPower",
+	Mode = "Toggle",
+	Callback = function(Value)
+		Toggles.ToggleJumpPower:SetValue(Value)
+		applyJumpPower()
+	end,
+})
+
+MainSettings:AddSlider("JumpPowerSlider", {
+	Text = "JumpPower",
+	Default = 50,
+	Min = 50,
+	Max = 300,
+	Rounding = 0,
+	Callback = function(v)
+		CurrentJumpPowerValue = v
+		applyJumpPower()
+	end,
+})
+
+MainSettings:AddToggle("ToggleInfiniteJump", {
+	Text = "Infinite Jump",
+	Default = false,
+	Tooltip = 'Combine with "JumpPower" to jump higher',
+	Callback = function(v)
+		InfiniteJumpEnabled = v
+	end,
+}):AddKeyPicker("InfiniteJumpKeyPicker", {
+	Default = "F3",
+	SyncToggleState = true,
+	Text = "Infinite Jump",
+	Mode = "Toggle",
+	Callback = function(Value)
+		Toggles.ToggleInfiniteJump:SetValue(Value)
+	end,
+})
+
+RunService.Heartbeat:Connect(function()
+	local Humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not Humanoid or Library.Unloaded then
+		return
+	end
+
+	if ToggleSpeedEnabled then
+		Humanoid.WalkSpeed = CurrentSpeedValue
+	end
+
+	if ToggleJumpPowerEnabled then
+		Humanoid.JumpPower = CurrentJumpPowerValue
+		Humanoid.JumpHeight = CurrentJumpPowerValue / 2.5
+	end
+end)
+
+trackConnection(UserInputService.JumpRequest:Connect(function()
+	local Humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if Library.Unloaded then
+		return
+	end
+
+	if InfiniteJumpEnabled and Humanoid then
+		Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+	end
+end))
+
 General:AddButton({
 	Text = "Rejoin Server",
 	Tooltip = "Rejoins the server",
@@ -127,7 +254,7 @@ General:AddButton({
 
 General:AddButton({
 	Text = "Server Hop",
-	Tooltip = "Hops to a different server",
+	Tooltip = "Hops to a different server in the same place",
 	DoubleClick = true,
 	Func = function()
 		local success, message = pcall(function()
