@@ -1277,10 +1277,10 @@ do
 				wait(0.2)
 
 				local Event
-				Event = InputService.InputBegan:Connect(function(Input)
+				Event = InputService.InputBegan:Connect(function(Input, Processed)
 					local Key
 
-					if Input.UserInputType == Enum.UserInputType.Keyboard then
+					if Input.UserInputType == Enum.UserInputType.Keyboard and not Processed then
 						Key = Input.KeyCode.Name
 					elseif Input.UserInputType == Enum.UserInputType.MouseButton1 then
 						Key = "MB1"
@@ -3621,14 +3621,6 @@ function Library:CreateWindow(...)
 				Input.UserInputType == Enum.UserInputType.Keyboard
 				and Input.KeyCode.Name == Library.ToggleKeybind.Value
 			then
-				if Processed then
-					return
-				end
-
-				if InputService:GetFocusedTextBox() then
-					return
-				end
-
 				task.spawn(Library.Toggle)
 			end
 		elseif
