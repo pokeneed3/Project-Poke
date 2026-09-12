@@ -3620,6 +3620,7 @@ function Library:CreateWindow(...)
 			if
 				Input.UserInputType == Enum.UserInputType.Keyboard
 				and Input.KeyCode.Name == Library.ToggleKeybind.Value
+				and not Processed
 			then
 				task.spawn(Library.Toggle)
 			end

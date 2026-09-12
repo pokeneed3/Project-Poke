@@ -2,6 +2,7 @@
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local Stats = game:GetService("Stats")
+local HttpService = game:GetService("HttpService")
 
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
@@ -86,6 +87,7 @@ General:AddButton({
 	Func = function()
 		if character and character.Parent then
 			SavedPositions["Base"] = character:GetPivot()
+			Library:Notify("Position Saved!", 5)
 		end
 	end,
 })
@@ -108,8 +110,50 @@ General:AddLabel("Keybind"):AddKeyPicker("TeleportKeyPicker", {
 	Default = "C",
 	Mode = "Toggle",
 	Text = "Teleport to Saved Position",
+	NoUI = true,
 	Callback = function()
 		teleportToSavedPosition()
+	end,
+})
+
+General:AddButton({
+	Text = "Rejoin Server",
+	Tooltip = "Rejoins the server",
+	DoubleClick = true,
+	Func = function()
+		game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, player)
+	end,
+})
+
+General:AddButton({
+	Text = "Server Hop",
+	Tooltip = "Hops to a different server",
+	DoubleClick = true,
+	Func = function()
+		local success, message = pcall(function()
+			local url = ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100"):format(
+				game.PlaceId
+			)
+			local response = HttpService:JSONDecode(game:HttpGet(url))
+			local availableServers = {}
+
+			for _, server in ipairs(response.data or {}) do
+				if server.id ~= game.JobId and server.playing < server.maxPlayers then
+					table.insert(availableServers, server)
+				end
+			end
+
+			if #availableServers == 0 then
+				error("No available servers found")
+			end
+
+			local server = availableServers[math.random(1, #availableServers)]
+			game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, server.id, player)
+		end)
+
+		if not success then
+			Library:Notify("Server hop failed: " .. tostring(message), 5)
+		end
 	end,
 })
 
