@@ -137,7 +137,7 @@ General:AddLabel("Keybind"):AddKeyPicker("TeleportKeyPicker", {
 	end,
 })
 
-MainSettings:AddToggle("ToggleSpeed", {
+General:AddToggle("ToggleSpeed", {
 	Text = "Speed",
 	Default = false,
 	Tooltip = "Makes your character move faster",
@@ -156,7 +156,7 @@ MainSettings:AddToggle("ToggleSpeed", {
 	end,
 })
 
-MainSettings:AddSlider("SpeedSlider", {
+General:AddSlider("SpeedSlider", {
 	Text = "Speed",
 	Default = 16,
 	Min = 16,
@@ -168,7 +168,7 @@ MainSettings:AddSlider("SpeedSlider", {
 	end,
 })
 
-MainSettings:AddToggle("ToggleJumpPower", {
+General:AddToggle("ToggleJumpPower", {
 	Text = "JumpPower",
 	Default = false,
 	Tooltip = "Makes your character jump higher",
@@ -187,7 +187,7 @@ MainSettings:AddToggle("ToggleJumpPower", {
 	end,
 })
 
-MainSettings:AddSlider("JumpPowerSlider", {
+General:AddSlider("JumpPowerSlider", {
 	Text = "JumpPower",
 	Default = 50,
 	Min = 50,
@@ -199,7 +199,7 @@ MainSettings:AddSlider("JumpPowerSlider", {
 	end,
 })
 
-MainSettings:AddToggle("ToggleInfiniteJump", {
+General:AddToggle("ToggleInfiniteJump", {
 	Text = "Infinite Jump",
 	Default = false,
 	Tooltip = 'Combine with "JumpPower" to jump higher',

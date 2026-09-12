@@ -3620,8 +3620,15 @@ function Library:CreateWindow(...)
 			if
 				Input.UserInputType == Enum.UserInputType.Keyboard
 				and Input.KeyCode.Name == Library.ToggleKeybind.Value
-				and not Processed
 			then
+				if Processed then
+					return
+				end
+
+				if UserInputService:GetFocusedTextBox() then
+					return
+				end
+
 				task.spawn(Library.Toggle)
 			end
 		elseif
