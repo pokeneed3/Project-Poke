@@ -3625,7 +3625,7 @@ function Library:CreateWindow(...)
 					return
 				end
 
-				if UserInputService:GetFocusedTextBox() then
+				if InputService:GetFocusedTextBox() then
 					return
 				end
 
