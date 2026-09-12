@@ -5,7 +5,7 @@ if game.GameId == 9931749389 then
 elseif game.GameId == 279565647 then
 	loadstring(
 		game:HttpGet(
-			"https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/ProjectPokeLuckyBlockBattlegrounds.Lua"
+			"https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/ProjectPokeLuckyBlockBattleGrounds.Lua"
 		)
 	)()
 else
