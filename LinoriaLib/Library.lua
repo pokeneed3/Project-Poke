@@ -1306,7 +1306,7 @@ do
 			end
 		end)
 
-		Library:GiveSignal(InputService.InputBegan:Connect(function(Input)
+		Library:GiveSignal(InputService.InputBegan:Connect(function(Input, Processed)
 			if Processed and not Picking then
 				return
 			end
