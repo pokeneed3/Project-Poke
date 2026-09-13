@@ -22,6 +22,8 @@ local repo = "https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/Lino
 local Library = assert(loadstring(game:HttpGet(repo .. "Library.lua")))()
 local ThemeManager = assert(loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua")))()
 local SaveManager = assert(loadstring(game:HttpGet(repo .. "addons/SaveManager.lua")))()
+local Options = assert(loadstring("return getgenv().Options"))()
+local Toggles = assert(loadstring("return getgenv().Toggles"))()
 
 -- 2. Load ESP and extract Config & Objects directly!
 local ESP = assert(loadstring(game:HttpGet("https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/Esp.Lua")))()
@@ -29,8 +31,6 @@ local ESPConfig = ESP.Config
 local ESPObjects = ESP.Objects
 
 -- Linoria's global Options & Toggles tables
-local Options = Library.Options
-local Toggles = Library.Toggles
 
 local Window = Library:CreateWindow({
 	Title = "Project Poke",
