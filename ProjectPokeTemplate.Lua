@@ -6,8 +6,6 @@ local Stats = game:GetService("Stats")
 -- Variables
 local Connections = {}
 
--- Main Functions
-
 local function trackConnection(connection)
 	table.insert(Connections, connection)
 end
@@ -19,16 +17,20 @@ local function disconnectConnections()
 	Connections = {}
 end
 
--- Library
+-- 1. Load LinoriaLib
 local repo = "https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/LinoriaLib/"
 local Library = assert(loadstring(game:HttpGet(repo .. "Library.lua")))()
 local ThemeManager = assert(loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua")))()
 local SaveManager = assert(loadstring(game:HttpGet(repo .. "addons/SaveManager.lua")))()
-local ESP = assert(loadstring(game:HttpGet("https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/Esp.lua")))()
-local ESPConfig = assert(loadstring("return getgenv().ESPConfig"))()
-local ESPObjects = assert(loadstring("return getgenv().ESPObjects"))()
-local Options = assert(loadstring("return getgenv().Options"))()
-local Toggles = assert(loadstring("return getgenv().Toggles"))()
+
+-- 2. Load ESP and extract Config & Objects directly!
+local ESP = assert(loadstring(game:HttpGet("https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/Esp.Lua")))()
+local ESPConfig = ESP.Config
+local ESPObjects = ESP.Objects
+
+-- Linoria's global Options & Toggles tables
+local Options = Library.Options
+local Toggles = Library.Toggles
 
 local Window = Library:CreateWindow({
 	Title = "Project Poke",
@@ -45,71 +47,79 @@ local Tabs = {
 	["UI Settings"] = Window:AddTab("UI Settings"),
 }
 
--------------------------------- Main Tab --------------------------------
-local TabBox = Tabs.Main:AddLeftTabbox()
-local General = TabBox:AddTab("General")
-local MainSettings = TabBox:AddTab("Settings")
-
-local RightTabBox = Tabs.Main:AddRightTabbox()
-
 -------------------------------- Visual Tab --------------------------------
 local VisualTabBox = Tabs.Visual:AddLeftTabbox()
 local VisualGeneral = VisualTabBox:AddTab("General")
 local VisualSettings = VisualTabBox:AddTab("Settings")
 
--- Toggle: Master ESP
-VisualGeneral:CreateToggle({
-	Name = "Enable ESP",
-	CurrentValue = ESPConfig.Enabled,
-	Callback = function(value)
-		ESPConfig.Enabled = value
+-- Master ESP Toggle with Box Colorpicker attached
+VisualGeneral:AddToggle("ESP_Enabled", {
+	Text = "Enable ESP",
+	Default = ESPConfig.Enabled,
+	Tooltip = "Toggle all player ESP visuals",
+	Callback = function(Value)
+		ESPConfig.Enabled = Value
+	end,
+}):AddColorPicker("ESP_BoxColor", {
+	Default = ESPConfig.BoxColor,
+	Title = "Box Color",
+	Callback = function(Value)
+		ESPConfig.BoxColor = Value
 	end,
 })
 
--- Toggle: Display Name vs Username
-VisualGeneral:CreateToggle({
-	Name = "Use Display Name",
-	CurrentValue = ESPConfig.UseDisplayName,
-	Callback = function(value)
-		ESPConfig.UseDisplayName = value
+-- Name Toggle with Text Colorpicker attached
+VisualGeneral:AddToggle("ESP_ShowName", {
+	Text = "Show Name",
+	Default = ESPConfig.ShowName or true,
+	Callback = function(Value)
+		ESPConfig.ShowName = Value
+	end,
+}):AddColorPicker("ESP_TextColor", {
+	Default = ESPConfig.TextColor,
+	Title = "Text Color",
+	Callback = function(Value)
+		ESPConfig.TextColor = Value
 	end,
 })
 
--- Toggle: Show Health Percentage
-VisualGeneral:CreateToggle({
-	Name = "Show Health %",
-	CurrentValue = ESPConfig.ShowHealth,
-	Callback = function(value)
-		ESPConfig.ShowHealth = value
+-- Display Name Toggle
+VisualGeneral:AddToggle("ESP_DisplayName", {
+	Text = "Use Display Name",
+	Default = ESPConfig.UseDisplayName or true,
+	Callback = function(Value)
+		ESPConfig.UseDisplayName = Value
 	end,
 })
 
--- Toggle: Show Distance
-VisualGeneral:CreateToggle({
-	Name = "Show Distance",
-	CurrentValue = ESPConfig.ShowDistance,
-	Callback = function(value)
-		ESPConfig.ShowDistance = value
+-- Health % Toggle
+VisualGeneral:AddToggle("ESP_ShowHealth", {
+	Text = "Show Health %",
+	Default = ESPConfig.ShowHealth or true,
+	Callback = function(Value)
+		ESPConfig.ShowHealth = Value
 	end,
 })
 
--- Color Picker: Box / Text Color
-VisualGeneral:CreateColorPicker({
-	Name = "Text Color",
-	Color = ESPConfig.TextColor,
-	Callback = function(newColor)
-		ESPConfig.TextColor = newColor
-		-- Update existing drawings immediately
-		for _, drawings in pairs(ESPObjects) do
-			drawings.Name.Color = newColor
-		end
+-- Distance Toggle
+VisualGeneral:AddToggle("ESP_ShowDistance", {
+	Text = "Show Distance",
+	Default = ESPConfig.ShowDistance,
+	Callback = function(Value)
+		ESPConfig.ShowDistance = Value
 	end,
 })
 
--------------------------------- AutoFarm Tab --------------------------------
-local AutoFarmTabBox = Tabs.AutoFarm:AddLeftTabbox()
+-- Team Check Toggle
+VisualGeneral:AddToggle("ESP_TeamCheck", {
+	Text = "Team Check",
+	Default = ESPConfig.TeamCheck,
+	Callback = function(Value)
+		ESPConfig.TeamCheck = Value
+	end,
+})
 
--------------------------------- UI Settings Tab --------------------------------
+-------------------------------- UI Settings Tab & Watermark --------------------------------
 Library:SetWatermarkVisibility(true)
 
 local FrameTimer = tick()
@@ -134,9 +144,13 @@ end))
 
 Library.KeybindFrame.Visible = true
 
+-- Unload handler: clean up connections and Drawing objects
 Library:OnUnload(function()
 	Library.Unloaded = true
 	disconnectConnections()
+	if ESP and ESP.Unload then
+		ESP.Unload()
+	end
 end)
 
 local MenuGroup = Tabs["UI Settings"]:AddLeftGroupbox("Menu")
@@ -154,8 +168,6 @@ MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", {
 	NoUI = false,
 	Text = "Menu keybind",
 })
-
---Library:Notify('Project Poke Loaded Press "End" to open the menu', 5)
 
 Library.ToggleKeybind = Options.MenuKeybind
 ThemeManager:SetLibrary(Library)

@@ -154,10 +154,41 @@ renderConnection = RunService.RenderStepped:Connect(function()
 	end
 end)
 
--- Setup listeners
+-- Setup listeners & store connections for cleanup
+local playerAddedConn = Players.PlayerAdded:Connect(createESP)
+local playerRemovingConn = Players.PlayerRemoving:Connect(removeESP)
+
 for _, player in ipairs(Players:GetPlayers()) do
 	createESP(player)
 end
 
-Players.PlayerAdded:Connect(createESP)
-Players.PlayerRemoving:Connect(removeESP)
+-- Define the unload function
+local function unload()
+	-- 1. Stop the render loop
+	if renderConnection then
+		renderConnection:Disconnect()
+		renderConnection = nil
+	end
+
+	-- 2. Disconnect player events
+	if playerAddedConn then
+		playerAddedConn:Disconnect()
+		playerAddedConn = nil
+	end
+	if playerRemovingConn then
+		playerRemovingConn:Disconnect()
+		playerRemovingConn = nil
+	end
+
+	-- 3. Destroy all active drawing primitives
+	for player, _ in pairs(ESPObjects) do
+		removeESP(player)
+	end
+end
+
+-- Return the module table
+return {
+	Config = ESPConfig,
+	Objects = ESPObjects,
+	Unload = unload,
+}
