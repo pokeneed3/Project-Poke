@@ -2749,7 +2749,7 @@ do
 
 	local WatermarkOuter = Library:Create("Frame", {
 		BorderColor3 = Color3.new(0, 0, 0),
-		Position = UDim2.fromOffset(100, 50),
+		Position = UDim2.fromOffset(100, 300),
 		Size = UDim2.fromOffset(213, 20),
 		ZIndex = 200,
 		Visible = false,
