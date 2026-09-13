@@ -21,9 +21,14 @@ end
 
 -- Library
 local repo = "https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/LinoriaLib/"
-local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
-local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
-local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
+local Library = assert(loadstring(game:HttpGet(repo .. "Library.lua")))()
+local ThemeManager = assert(loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua")))()
+local SaveManager = assert(loadstring(game:HttpGet(repo .. "addons/SaveManager.lua")))()
+local ESP = assert(loadstring(game:HttpGet("https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/Esp.lua")))()
+local ESPConfig = assert(loadstring("return getgenv().ESPConfig"))()
+local ESPObjects = assert(loadstring("return getgenv().ESPObjects"))()
+local Options = assert(loadstring("return getgenv().Options"))()
+local Toggles = assert(loadstring("return getgenv().Toggles"))()
 
 local Window = Library:CreateWindow({
 	Title = "Project Poke",
@@ -52,6 +57,55 @@ local VisualTabBox = Tabs.Visual:AddLeftTabbox()
 local VisualGeneral = VisualTabBox:AddTab("General")
 local VisualSettings = VisualTabBox:AddTab("Settings")
 
+-- Toggle: Master ESP
+VisualGeneral:CreateToggle({
+	Name = "Enable ESP",
+	CurrentValue = ESPConfig.Enabled,
+	Callback = function(value)
+		ESPConfig.Enabled = value
+	end,
+})
+
+-- Toggle: Display Name vs Username
+VisualGeneral:CreateToggle({
+	Name = "Use Display Name",
+	CurrentValue = ESPConfig.UseDisplayName,
+	Callback = function(value)
+		ESPConfig.UseDisplayName = value
+	end,
+})
+
+-- Toggle: Show Health Percentage
+VisualGeneral:CreateToggle({
+	Name = "Show Health %",
+	CurrentValue = ESPConfig.ShowHealth,
+	Callback = function(value)
+		ESPConfig.ShowHealth = value
+	end,
+})
+
+-- Toggle: Show Distance
+VisualGeneral:CreateToggle({
+	Name = "Show Distance",
+	CurrentValue = ESPConfig.ShowDistance,
+	Callback = function(value)
+		ESPConfig.ShowDistance = value
+	end,
+})
+
+-- Color Picker: Box / Text Color
+VisualGeneral:CreateColorPicker({
+	Name = "Text Color",
+	Color = ESPConfig.TextColor,
+	Callback = function(newColor)
+		ESPConfig.TextColor = newColor
+		-- Update existing drawings immediately
+		for _, drawings in pairs(ESPObjects) do
+			drawings.Name.Color = newColor
+		end
+	end,
+})
+
 -------------------------------- AutoFarm Tab --------------------------------
 local AutoFarmTabBox = Tabs.AutoFarm:AddLeftTabbox()
 
@@ -71,8 +125,8 @@ trackConnection(RunService.RenderStepped:Connect(function()
 		FrameCounter = 0
 		Library:SetWatermark(
 			("Poke Hub | %s fps | %s ms"):format(
-				math.floor(FPS),
-				math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
+				tostring(math.floor(FPS)),
+				tostring(math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue()))
 			)
 		)
 	end

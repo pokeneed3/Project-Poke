@@ -60,10 +60,11 @@ end
 
 -- Library
 local repo = "https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/LinoriaLib/"
-local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
-local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
-local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
-local Options = loadstring("return getgenv().Options")()
+local Library = assert(loadstring(game:HttpGet(repo .. "Library.lua")))()
+local ThemeManager = assert(loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua")))()
+local SaveManager = assert(loadstring(game:HttpGet(repo .. "addons/SaveManager.lua")))()
+local Options = assert(loadstring("return getgenv().Options"))()
+local Toggles = assert(loadstring("return getgenv().Toggles"))()
 
 local Window = Library:CreateWindow({
 	Title = "Project Poke",
@@ -85,13 +86,17 @@ local TabBox = Tabs.Main:AddLeftTabbox()
 local General = TabBox:AddTab("General")
 local MainSettings = TabBox:AddTab("Settings")
 
-local RightTabBox = Tabs.Main:AddRightTabbox()
+local _RightTabBox = Tabs.Main:AddRightTabbox()
 
 General:AddButton({
 	Text = "Spawn Random Tool",
 	Tooltip = "Gives you a random tool",
 	Func = function()
-		local Event = game:GetService("ReplicatedStorage").SpawnGalaxyBlock
+		local Event = game:GetService("ReplicatedStorage"):FindFirstChild("SpawnGalaxyBlock")
+		if not Event then
+			Library:Notify("SpawnGalaxyBlock was not found", 5)
+			return
+		end
 
 		task.spawn(function()
 			for _ = 1, 150 do
@@ -290,11 +295,11 @@ General:AddButton({
 
 -------------------------------- Visual Tab --------------------------------
 local VisualTabBox = Tabs.Visual:AddLeftTabbox()
-local VisualGeneral = VisualTabBox:AddTab("General")
-local VisualSettings = VisualTabBox:AddTab("Settings")
+local _VisualGeneral = VisualTabBox:AddTab("General")
+local _VisualSettings = VisualTabBox:AddTab("Settings")
 
 -------------------------------- AutoFarm Tab --------------------------------
-local AutoFarmTabBox = Tabs.AutoFarm:AddLeftTabbox()
+local _AutoFarmTabBox = Tabs.AutoFarm:AddLeftTabbox()
 
 -------------------------------- UI Settings Tab --------------------------------
 Library:SetWatermarkVisibility(true)
@@ -312,12 +317,14 @@ trackConnection(RunService.RenderStepped:Connect(function()
 		FrameCounter = 0
 		Library:SetWatermark(
 			("Poke Hub | %s fps | %s ms"):format(
-				math.floor(FPS),
-				math.floor(
-					(
-						Stats.Network.ServerStatsItem["Data Ping"]
-						and Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
-					) or 0
+				tostring(math.floor(FPS)),
+				tostring(
+					math.floor(
+						(
+							Stats.Network.ServerStatsItem["Data Ping"]
+							and Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+						) or 0
+					)
 				)
 			)
 		)

@@ -64,9 +64,11 @@ end
 
 -- Library
 local repo = "https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/LinoriaLib/"
-local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
-local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
-local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
+local Library = assert(loadstring(game:HttpGet(repo .. "Library.lua")))()
+local ThemeManager = assert(loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua")))()
+local SaveManager = assert(loadstring(game:HttpGet(repo .. "addons/SaveManager.lua")))()
+local Options = assert(loadstring("return getgenv().Options"))()
+local Toggles = assert(loadstring("return getgenv().Toggles"))()
 
 local Window = Library:CreateWindow({
 	Title = "Project Poke",
@@ -131,8 +133,8 @@ trackConnection(RunService.RenderStepped:Connect(function()
 		FrameCounter = 0
 		Library:SetWatermark(
 			("Poke Hub | %s fps | %s ms"):format(
-				math.floor(FPS),
-				math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
+				tostring(math.floor(FPS)),
+				tostring(math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue()))
 			)
 		)
 	end
@@ -168,7 +170,7 @@ ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
 SaveManager:IgnoreThemeSettings()
 ThemeManager:SetFolder("Project Poke")
-SaveManager:SetFolder("Project Poke/Dungeon Quest Reborn")
+SaveManager:SetFolder("Project Poke/JJS")
 SaveManager:BuildConfigSection(Tabs["UI Settings"])
 ThemeManager:ApplyToTab(Tabs["UI Settings"])
 SaveManager:LoadAutoloadConfig()
