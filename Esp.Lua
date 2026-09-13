@@ -86,10 +86,7 @@ local function removeESP(player)
 	if ESPObjects[player] then
 		for _, drawing in pairs(ESPObjects[player]) do
 			drawing.Visible = false
-			local destroyFn = drawing.Destroy or drawing.Remove
-			if destroyFn then
-				destroyFn(drawing)
-			end
+			drawing:Destroy()
 		end
 		ESPObjects[player] = nil
 	end
