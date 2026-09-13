@@ -130,7 +130,7 @@ renderConnection = RunService.RenderStepped:Connect(function()
 		local char, root, humanoid = isValidCharacter(player)
 		local isTeammate = ESPConfig.TeamCheck and (player.Team ~= nil and player.Team == LocalPlayer.Team)
 
-		if humanoid.Health <= 0 and char and not isTeammate then
+		if char and not isTeammate then
 			local rootPos, onScreen = Camera:WorldToViewportPoint(root.Position)
 
 			if onScreen then
