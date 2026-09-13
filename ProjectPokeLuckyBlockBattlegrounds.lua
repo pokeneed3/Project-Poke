@@ -350,7 +350,7 @@ MenuGroup:AddButton({
 
 MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", {
 	Default = "RightAlt",
-	NoUI = false,
+	NoUI = true,
 	Text = "Menu keybind",
 })
 
