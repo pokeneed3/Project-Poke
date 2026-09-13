@@ -133,6 +133,10 @@ renderConnection = RunService.RenderStepped:Connect(function()
 		if char and not isTeammate then
 			local rootPos, onScreen = Camera:WorldToViewportPoint(root.Position)
 
+			if humanoid.Health <= 0 then
+				hideESP(drawings)
+			end
+
 			if onScreen then
 				local headPos = Camera:WorldToViewportPoint(root.Position + Vector3.new(0, 2.5, 0))
 				local legPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3.5, 0))
