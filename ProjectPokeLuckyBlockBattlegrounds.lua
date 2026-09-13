@@ -156,7 +156,7 @@ General:AddToggle("ToggleSpeed", {
 	end,
 })
 
-General:AddSlider("SpeedSlider", {
+MainSettings:AddSlider("SpeedSlider", {
 	Text = "Speed",
 	Default = 16,
 	Min = 16,
@@ -187,7 +187,7 @@ General:AddToggle("ToggleJumpPower", {
 	end,
 })
 
-General:AddSlider("JumpPowerSlider", {
+MainSettings:AddSlider("JumpPowerSlider", {
 	Text = "JumpPower",
 	Default = 50,
 	Min = 50,
@@ -224,11 +224,15 @@ RunService.Heartbeat:Connect(function()
 
 	if ToggleSpeedEnabled then
 		Humanoid.WalkSpeed = CurrentSpeedValue
+	else
+		Humanoid.WalkSpeed = 16
 	end
 
 	if ToggleJumpPowerEnabled then
 		Humanoid.JumpPower = CurrentJumpPowerValue
 		Humanoid.JumpHeight = CurrentJumpPowerValue / 2.5
+	else
+		Humanoid.JumpPower = 50
 	end
 end)
 
