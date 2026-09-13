@@ -130,12 +130,8 @@ renderConnection = RunService.RenderStepped:Connect(function()
 		local char, root, humanoid = isValidCharacter(player)
 		local isTeammate = ESPConfig.TeamCheck and (player.Team ~= nil and player.Team == LocalPlayer.Team)
 
-		if char and not isTeammate then
+		if humanoid.Health <= 0 and char and not isTeammate then
 			local rootPos, onScreen = Camera:WorldToViewportPoint(root.Position)
-
-			if humanoid.Health <= 0 then
-				hideESP(drawings)
-			end
 
 			if onScreen then
 				local headPos = Camera:WorldToViewportPoint(root.Position + Vector3.new(0, 2.5, 0))
