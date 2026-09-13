@@ -69,7 +69,7 @@ local function createESP(player)
 	drawings.HealthBarOutline.Filled = true
 	drawings.HealthBarOutline.Transparency = 0.8
 	drawings.HealthBarOutline.ZIndex = 2
-	-- hello
+
 	-- Configure Health Bar Fill
 	drawings.HealthBar.Visible = false
 	drawings.HealthBar.Color = Color3.fromRGB(0, 255, 0)
