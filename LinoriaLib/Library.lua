@@ -19,14 +19,16 @@ ProtectGui(ScreenGui)
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
 ScreenGui.Parent = CoreGui
 
-local Toggles = {}
-local Options = {}
-local getgenv = _G.getgenv or function()
-	return _G
+-- Fetch from _G (where your Library.lua actually stores them)
+local Options = _G.Options or (getgenv and getgenv().Options)
+local Toggles = _G.Toggles or (getgenv and getgenv().Toggles)
+-- Bridge them so both Library and getgenv have them for addons/SaveManager
+Library.Options = Options
+Library.Toggles = Toggles
+if getgenv then
+	getgenv().Options = Options
+	getgenv().Toggles = Toggles
 end
-
-getgenv().Toggles = Toggles
-getgenv().Options = Options
 
 local Library = {
 	Registry = {},
