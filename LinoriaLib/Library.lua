@@ -22,13 +22,6 @@ ScreenGui.Parent = CoreGui
 -- Fetch from _G (where your Library.lua actually stores them)
 local Options = _G.Options or (getgenv and getgenv().Options)
 local Toggles = _G.Toggles or (getgenv and getgenv().Toggles)
--- Bridge them so both Library and getgenv have them for addons/SaveManager
-Library.Options = Options
-Library.Toggles = Toggles
-if getgenv then
-	getgenv().Options = Options
-	getgenv().Toggles = Toggles
-end
 
 local Library = {
 	Registry = {},
@@ -52,6 +45,14 @@ local Library = {
 	Signals = {},
 	ScreenGui = ScreenGui,
 }
+
+if getgenv then
+	getgenv().Options = Options
+	getgenv().Toggles = Toggles
+end
+
+Library.Options = Options
+Library.Toggles = Toggles
 
 local RainbowStep = 0
 local Hue = 0
