@@ -22,6 +22,7 @@ local repo = "https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/Lino
 local Library = assert(loadstring(game:HttpGet(repo .. "Library.lua")))()
 local ThemeManager = assert(loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua")))()
 local SaveManager = assert(loadstring(game:HttpGet(repo .. "addons/SaveManager.lua")))()
+local Options = Library.Options
 
 -- 2. Load ESP and extract Config & Objects directly!
 local ESP = assert(loadstring(game:HttpGet("https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/Esp.Lua")))()

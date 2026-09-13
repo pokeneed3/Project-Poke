@@ -13,7 +13,10 @@ elseif game.GameId == 279565647 then
 		)
 	)()
 else
-	return
 	-- Load Universal script instead
-	--loadstring(game:HttpGet("https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/Universal.Lua"))()
+	assert(
+		loadstring(
+			game:HttpGet("https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/ProjectPokeUniversal.Lua")
+		)
+	)()
 end
