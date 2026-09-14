@@ -14,29 +14,16 @@ local ESPConfig = {
 	TextSize = 14,
 
 	-- Toggles (text)
-	ShowBox = true,
 	ShowName = true,
 	UseDisplayName = true,
 	ShowDistance = true,
 	TeamCheck = false,
-
-	BarsEnabled = true,
-
-	Groups = {},
 }
 
 local ESPObjects = {} -- [Instance] = drawings
 local CustomBars = {} -- Stores bar blueprints registered via ESP.NewBar
 
 -- Helper: Destroy a drawing safely
-
-local customGroupResolver = function(instance)
-	if instance:IsA("Player") then
-		return "Players"
-	end
-	return "Default"
-end
-
 local function safeDestroy(drawing)
 	if drawing then
 		drawing.Visible = false
@@ -71,21 +58,16 @@ local function createBarForPlayer(playerDrawings, barDef)
 	}
 end
 
-local TargetGroups = {}
-
+-- Adapter: turn any Instance into a uniform "target" object
 local function makeTarget(instance)
-	-- Determine group: explicit assign > custom resolver > "Default"
-	local assignedGroup = TargetGroups[instance] or (customGroupResolver and customGroupResolver(instance)) or "Default"
-
 	if instance:IsA("Player") then
 		return {
-			Group = assignedGroup,
 			Instance = instance,
 			GetModel = function()
 				return instance.Character
 			end,
 			GetName = function()
-				return instance.DisplayName
+				return ESPConfig.UseDisplayName and instance.DisplayName or ("@" .. instance.Name)
 			end,
 			GetTeam = function()
 				return instance.Team
@@ -93,7 +75,6 @@ local function makeTarget(instance)
 		}
 	elseif instance:IsA("Model") then
 		return {
-			Group = assignedGroup,
 			Instance = instance,
 			GetModel = function()
 				return instance
@@ -189,16 +170,6 @@ local function isValidCharacter(target)
 	return nil
 end
 
-local function getSetting(target, key)
-	if target and target.Group then
-		local groupConfig = ESPConfig.Groups[target.Group]
-		if groupConfig and groupConfig[key] ~= nil then
-			return groupConfig[key]
-		end
-	end
-	return ESPConfig[key]
-end
-
 -- Helper: Hide all primitives for a target
 local function hideESP(drawings)
 	drawings.Box.Visible = false
@@ -240,14 +211,10 @@ renderConnection = RunService.RenderStepped:Connect(function()
 					local boxY = math.min(headPos.Y, legPos.Y)
 
 					-- 1. Update Box
-					if ESPConfig.ShowBox then
-						drawings.Box.Size = Vector2.new(width, height)
-						drawings.Box.Position = Vector2.new(boxX, boxY)
-						drawings.Box.Color = ESPConfig.BoxColor
-						drawings.Box.Visible = true
-					else
-						drawings.Box.Visible = false
-					end
+					drawings.Box.Size = Vector2.new(width, height)
+					drawings.Box.Position = Vector2.new(boxX, boxY)
+					drawings.Box.Color = ESPConfig.BoxColor
+					drawings.Box.Visible = true
 
 					-- 2. Update Dynamic Bars (Automatic side-stacking)
 					local leftOffset = 4
@@ -258,60 +225,55 @@ renderConnection = RunService.RenderStepped:Connect(function()
 					for _, barDef in ipairs(CustomBars) do
 						local barDrawings = drawings.Bars[barDef.Name]
 						if barDrawings then
-							if not ESPConfig.BarsEnabled or not barDef.Enabled then
-								barDrawings.Outline.Visible = false
-								barDrawings.Fill.Visible = false
-							else
-								-- Pass raw instance so bar authors can branch on Player vs Model
-								local curVal, maxVal = barDef.GetValue(char, instance)
-								maxVal = (maxVal and maxVal > 0) and maxVal or 100
-								local ratio = math.clamp((curVal or 0) / maxVal, 0, 1)
+							-- Pass raw instance so bar authors can branch on Player vs Model
+							local curVal, maxVal = barDef.GetValue(char, instance)
+							maxVal = (maxVal and maxVal > 0) and maxVal or 100
+							local ratio = math.clamp((curVal or 0) / maxVal, 0, 1)
 
-								local barWidth = barDef.Width or 2
+							local barWidth = barDef.Width or 2
 
-								if barDef.Side == "Right" then
-									local barX = boxX + width + rightOffset
-									rightOffset = rightOffset + barWidth + barSpacing + 2
+							if barDef.Side == "Right" then
+								local barX = boxX + width + rightOffset
+								rightOffset = rightOffset + barWidth + barSpacing + 2
 
-									barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
-									barDrawings.Outline.Size = Vector2.new(barWidth + 2, height + 2)
+								barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
+								barDrawings.Outline.Size = Vector2.new(barWidth + 2, height + 2)
 
-									local barHeight = math.floor(height * ratio)
-									barDrawings.Fill.Position = Vector2.new(barX, boxY + (height - barHeight))
-									barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
-								elseif barDef.Side == "Bottom" then
-									local barY = boxY + height + bottomOffset
-									bottomOffset = bottomOffset + barWidth + barSpacing + 2
+								local barHeight = math.floor(height * ratio)
+								barDrawings.Fill.Position = Vector2.new(barX, boxY + (height - barHeight))
+								barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
+							elseif barDef.Side == "Bottom" then
+								local barY = boxY + height + bottomOffset
+								bottomOffset = bottomOffset + barWidth + barSpacing + 2
 
-									barDrawings.Outline.Position = Vector2.new(boxX - 1, barY - 1)
-									barDrawings.Outline.Size = Vector2.new(width + 2, barWidth + 2)
+								barDrawings.Outline.Position = Vector2.new(boxX - 1, barY - 1)
+								barDrawings.Outline.Size = Vector2.new(width + 2, barWidth + 2)
 
-									local fillWidth = math.floor(width * ratio)
-									barDrawings.Fill.Position = Vector2.new(boxX, barY)
-									barDrawings.Fill.Size = Vector2.new(fillWidth, barWidth)
-								elseif barDef.Side == "Left" then
-									leftOffset = leftOffset + barWidth
-									local barX = boxX - leftOffset
-									leftOffset = leftOffset + barSpacing + 2
+								local fillWidth = math.floor(width * ratio)
+								barDrawings.Fill.Position = Vector2.new(boxX, barY)
+								barDrawings.Fill.Size = Vector2.new(fillWidth, barWidth)
+							elseif barDef.Side == "Left" then
+								leftOffset = leftOffset + barWidth
+								local barX = boxX - leftOffset
+								leftOffset = leftOffset + barSpacing + 2
 
-									barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
-									barDrawings.Outline.Size = Vector2.new(barWidth + 2, height + 2)
+								barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
+								barDrawings.Outline.Size = Vector2.new(barWidth + 2, height + 2)
 
-									local barHeight = math.floor(height * ratio)
-									barDrawings.Fill.Position = Vector2.new(barX, boxY + (height - barHeight))
-									barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
-								end
-
-								if barDef.LerpColor then
-									barDrawings.Fill.Color = Color3.fromRGB(255, 0, 0)
-										:Lerp(Color3.fromRGB(0, 255, 0), ratio)
-								else
-									barDrawings.Fill.Color = barDef.Color or Color3.fromRGB(0, 255, 0)
-								end
-
-								barDrawings.Outline.Visible = true
-								barDrawings.Fill.Visible = (ratio > 0)
+								local barHeight = math.floor(height * ratio)
+								barDrawings.Fill.Position = Vector2.new(barX, boxY + (height - barHeight))
+								barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
 							end
+
+							if barDef.LerpColor then
+								barDrawings.Fill.Color = Color3.fromRGB(255, 0, 0)
+									:Lerp(Color3.fromRGB(0, 255, 0), ratio)
+							else
+								barDrawings.Fill.Color = barDef.Color or Color3.fromRGB(0, 255, 0)
+							end
+
+							barDrawings.Outline.Visible = true
+							barDrawings.Fill.Visible = (ratio > 0)
 						end
 					end
 
@@ -378,7 +340,6 @@ local function NewBar(args)
 		Color = args.Color or Color3.fromRGB(0, 255, 0),
 		LerpColor = args.LerpColor or false,
 		GetValue = args.GetValue,
-		Enabled = args.Enabled ~= false,
 	}
 
 	table.insert(CustomBars, barDef)
@@ -392,23 +353,6 @@ local function NewBar(args)
 
 	-- Return handle to allow removing this bar later
 	return {
-
-		Def = barDef, -- expose the definition
-
-		SetEnabled = function(state)
-			barDef.Enabled = state and true or false
-
-			if not barDef.Enabled then
-				for _, drawings in pairs(ESPObjects) do
-					local bd = drawings.Bars[barDef.Name]
-					if bd then
-						bd.Outline.Visible = false
-						bd.Fill.Visible = false
-					end
-				end
-			end
-		end,
-
 		Remove = function()
 			for i, def in ipairs(CustomBars) do
 				if def.Name == barDef.Name then
@@ -424,60 +368,15 @@ local function NewBar(args)
 				end
 			end
 		end,
-
-		SetGroup = function(groupName, changes)
-			local group = ESPConfig.Groups[groupName]
-			if not group then
-				return false
-			end
-
-			for property, value in pairs(changes) do
-				group[property] = value
-			end
-
-			return true
-		end,
-
-		SetBarEnabled = function(barName, state)
-			for _, barDef in ipairs(CustomBars) do
-				if barDef.Name == barName then
-					barDef.Enabled = state
-					return true
-				end
-			end
-
-			return false
-		end,
 	}
 end
 
 -- Public API (call with dot syntax: ESP.Track(x), ESP.NewBar({...}), etc.)
--- Public API
 return {
 	Config = ESPConfig,
+	Objects = ESPObjects,
+	NewBar = NewBar,
 	Track = createESP,
 	Untrack = removeESP,
-
-	-- Register or update a group's settings dynamically
-	SetGroupConfig = function(groupName, settingsTable)
-		ESPConfig.Groups[groupName] = ESPConfig.Groups[groupName] or {}
-		for key, val in pairs(settingsTable) do
-			ESPConfig.Groups[groupName][key] = val
-		end
-	end,
-
-	-- Manually assign a specific instance to a group
-	SetInstanceGroup = function(instance, groupName)
-		TargetGroups[instance] = groupName
-		-- Re-run target setup if already tracked
-		if ESPObjects[instance] then
-			ESPObjects[instance].Target.Group = groupName
-		end
-	end,
-
-	-- Set a rule function to auto-assign groups (e.g. by Folder or Name)
-	SetGroupResolver = function(resolverFn)
-		assert(type(resolverFn) == "function", "Resolver must be a function")
-		customGroupResolver = resolverFn
-	end,
+	Unload = unload,
 }
