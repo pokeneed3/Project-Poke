@@ -170,7 +170,7 @@ General:AddToggle("Speed", {
 		if Value then
 			task.spawn(function()
 				SpeedConnection = RunService.Heartbeat:Connect(function()
-					local player = game:GetService("Players")
+					local player = game:GetService("Players").LocalPlayer
 					local humanoid = player.Character:FindFirstChild("Humanoid")
 					local root = player.Character:FindFirstChild("HumanoidRootPart")
 					local dir = humanoid.MoveDirection
