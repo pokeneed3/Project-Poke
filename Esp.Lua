@@ -13,15 +13,33 @@ local ESPConfig = {
 	TextColor = Color3.fromRGB(255, 255, 255),
 	TextSize = 14,
 
-	-- Toggles (text)
+	-- Toggles (global defaults)
+	ShowBox = true,
 	ShowName = true,
 	UseDisplayName = true,
 	ShowDistance = true,
+	ShowBars = true,
+	ShowHealth = true,
 	TeamCheck = false,
+
+	-- Per-group overrides. Any key set here wins over the global default
+	-- above, for targets whose resolved Group matches this key.
+	-- Populated externally via ESP.Config.Groups[name] = {...}
+	Groups = {},
 }
 
 local ESPObjects = {} -- [Instance] = drawings
 local CustomBars = {} -- Stores bar blueprints registered via ESP:NewBar
+local GroupClassifiers = {} -- Ordered list of {Name, Predicate}, registered externally
+
+-- Helper: look up a setting for a target's group, falling back to global
+local function getSetting(group, key)
+	local groupCfg = ESPConfig.Groups[group]
+	if groupCfg and groupCfg[key] ~= nil then
+		return groupCfg[key]
+	end
+	return ESPConfig[key]
+end
 
 -- Helper: Destroy a drawing safely
 local function safeDestroy(drawing)
@@ -34,8 +52,112 @@ local function safeDestroy(drawing)
 	end
 end
 
--- Helper: Instantiates a single bar's drawing primitives for one target
-local function createBarForPlayer(playerDrawings, barDef)
+-- Resolve which group an instance belongs to. Checks externally registered
+-- classifiers in priority order (first match wins), then falls back to
+-- "Player" for Players and "Mob" for everything else.
+local function resolveGroup(instance)
+	for _, classifier in ipairs(GroupClassifiers) do
+		local ok, matches = pcall(classifier.Predicate, instance)
+		if ok and matches then
+			return classifier.Name
+		elseif not ok then
+			warn("[ESP] Group classifier '" .. classifier.Name .. "' errored:", matches)
+		end
+	end
+
+	if instance:IsA("Player") then
+		return "Player"
+	end
+	return "Mob"
+end
+
+-- Register a new group classifier from external code.
+-- predicate: function(instance) -> boolean
+-- atFront: optional, insert as highest priority (checked before existing ones)
+-- Re-registering an existing name replaces it in place (keeps its priority
+-- position) unless atFront is explicitly passed.
+local function RegisterGroup(selfOrName, nameOrPredicate, predicateOrAtFront, atFront)
+	-- Accept both ESP:RegisterGroup(...) and ESP.RegisterGroup(...).
+	local name, predicate
+	if type(selfOrName) == "table" then
+		name, predicate = nameOrPredicate, predicateOrAtFront
+	else
+		name, predicate, atFront = selfOrName, nameOrPredicate, predicateOrAtFront
+	end
+
+	assert(type(name) == "string", "Group name must be a string")
+	assert(type(predicate) == "function", "predicate must be function(instance) -> boolean")
+
+	for i, c in ipairs(GroupClassifiers) do
+		if c.Name == name then
+			if atFront then
+				table.remove(GroupClassifiers, i)
+				break
+			else
+				c.Predicate = predicate
+				return
+			end
+		end
+	end
+
+	if atFront then
+		table.insert(GroupClassifiers, 1, { Name = name, Predicate = predicate })
+	else
+		table.insert(GroupClassifiers, { Name = name, Predicate = predicate })
+	end
+end
+
+local function UnregisterGroup(selfOrName, name)
+	if type(selfOrName) ~= "table" then
+		name = selfOrName
+	end
+
+	for i, c in ipairs(GroupClassifiers) do
+		if c.Name == name then
+			table.remove(GroupClassifiers, i)
+			return true
+		end
+	end
+	return false
+end
+
+-- Re-evaluate an already-tracked target's group (e.g. after an attribute
+-- changes, like a mob becoming a "Boss" mid-fight). Rebuilds its bars to
+-- match the new group's bar set.
+local function RefreshGroup(_, instance)
+	local drawings = ESPObjects[instance]
+	if not drawings then
+		return
+	end
+
+	local newGroup = resolveGroup(instance)
+	if newGroup == drawings.Target.Group then
+		return
+	end
+	drawings.Target.Group = newGroup
+
+	-- Rebuild bars: destroy ones that no longer apply, create ones that now do
+	for _, barDef in ipairs(CustomBars) do
+		local applies = not barDef.Groups or table.find(barDef.Groups, newGroup) ~= nil
+		local existing = drawings.Bars[barDef.Name]
+
+		if applies and not existing then
+			-- created below via createBarForPlayer, defined further down
+		elseif not applies and existing then
+			safeDestroy(existing.Outline)
+			safeDestroy(existing.Fill)
+			drawings.Bars[barDef.Name] = nil
+		end
+	end
+end
+
+-- Helper: Instantiates a single bar's drawing primitives for one target,
+-- skipping creation entirely if this bar doesn't apply to the target's group
+local function createBarForPlayer(playerDrawings, barDef, group)
+	if barDef.Groups and not table.find(barDef.Groups, group) then
+		return
+	end
+
 	local outline = Drawing.new("Square")
 	outline.Visible = false
 	outline.Color = Color3.fromRGB(0, 0, 0)
@@ -58,11 +180,41 @@ local function createBarForPlayer(playerDrawings, barDef)
 	}
 end
 
+-- RefreshGroup needs createBarForPlayer, patch it in now that both exist
+do
+	RefreshGroup = function(_, instance)
+		local drawings = ESPObjects[instance]
+		if not drawings then
+			return
+		end
+
+		local newGroup = resolveGroup(instance)
+		if newGroup == drawings.Target.Group then
+			return
+		end
+		drawings.Target.Group = newGroup
+
+		for _, barDef in ipairs(CustomBars) do
+			local applies = not barDef.Groups or table.find(barDef.Groups, newGroup) ~= nil
+			local existing = drawings.Bars[barDef.Name]
+
+			if applies and not existing then
+				createBarForPlayer(drawings, barDef, newGroup)
+			elseif not applies and existing then
+				safeDestroy(existing.Outline)
+				safeDestroy(existing.Fill)
+				drawings.Bars[barDef.Name] = nil
+			end
+		end
+	end
+end
+
 -- Adapter: turn any Instance into a uniform "target" object
-local function makeTarget(instance)
+local function makeTarget(instance, groupOverride)
 	if instance:IsA("Player") then
 		return {
 			Instance = instance,
+			Group = groupOverride or resolveGroup(instance),
 			GetModel = function()
 				return instance.Character
 			end,
@@ -76,6 +228,7 @@ local function makeTarget(instance)
 	elseif instance:IsA("Model") then
 		return {
 			Instance = instance,
+			Group = groupOverride or resolveGroup(instance),
 			GetModel = function()
 				return instance
 			end,
@@ -90,7 +243,7 @@ local function makeTarget(instance)
 	return nil
 end
 
-local function createESP(instance)
+local function createESP(instance, groupOverride)
 	if instance == LocalPlayer then
 		return
 	end
@@ -98,7 +251,7 @@ local function createESP(instance)
 		return
 	end -- already tracked
 
-	local target = makeTarget(instance)
+	local target = makeTarget(instance, groupOverride)
 	if not target then
 		return
 	end
@@ -112,7 +265,7 @@ local function createESP(instance)
 
 	-- Configure Box
 	drawings.Box.Visible = false
-	drawings.Box.Color = ESPConfig.BoxColor
+	drawings.Box.Color = getSetting(target.Group, "BoxColor")
 	drawings.Box.Thickness = 1
 	drawings.Box.Filled = false
 	drawings.Box.Transparency = 1
@@ -120,7 +273,7 @@ local function createESP(instance)
 
 	-- Configure Name / Info Text
 	drawings.Name.Visible = false
-	drawings.Name.Color = ESPConfig.TextColor
+	drawings.Name.Color = getSetting(target.Group, "TextColor")
 	drawings.Name.Size = ESPConfig.TextSize
 	drawings.Name.Center = true
 	drawings.Name.Outline = true
@@ -129,7 +282,7 @@ local function createESP(instance)
 
 	-- Build primitives for any bars registered before this target existed
 	for _, barDef in ipairs(CustomBars) do
-		createBarForPlayer(drawings, barDef)
+		createBarForPlayer(drawings, barDef, target.Group)
 	end
 
 	ESPObjects[instance] = drawings
@@ -180,6 +333,150 @@ local function hideESP(drawings)
 	end
 end
 
+-- Keep Camera in sync if it ever changes (respawn, seat, custom camera swaps)
+Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+	Camera = Workspace.CurrentCamera
+end)
+
+-- Per-target render/update, isolated so one bad target can't break the frame
+local function updateTarget(instance, drawings)
+	local target = drawings.Target
+	local group = target.Group
+	local char, root = isValidCharacter(target)
+
+	local isTeammate = ESPConfig.TeamCheck and LocalPlayer.Team ~= nil and target.GetTeam() == LocalPlayer.Team
+
+	if not char or isTeammate then
+		hideESP(drawings)
+		return
+	end
+
+	local rootPos, onScreen = Camera:WorldToViewportPoint(root.Position)
+	if not onScreen then
+		hideESP(drawings)
+		return
+	end
+
+	local headPos = Camera:WorldToViewportPoint(root.Position + Vector3.new(0, 2.5, 0))
+	local legPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3.5, 0))
+
+	if not (headPos.Z > 0 and legPos.Z > 0) then
+		hideESP(drawings)
+		return
+	end
+
+	local height = math.abs(headPos.Y - legPos.Y)
+	local width = height / 1.6
+
+	local boxX = rootPos.X - (width / 2)
+	local boxY = math.min(headPos.Y, legPos.Y)
+
+	-- 1. Update Box
+	if getSetting(group, "ShowBox") then
+		drawings.Box.Size = Vector2.new(width, height)
+		drawings.Box.Position = Vector2.new(boxX, boxY)
+		drawings.Box.Color = getSetting(group, "BoxColor")
+		drawings.Box.Visible = true
+	else
+		drawings.Box.Visible = false
+	end
+
+	-- 2. Update Dynamic Bars (Automatic side-stacking)
+	if getSetting(group, "ShowBars") and getSetting(group, "ShowHealth") ~= false then
+		local leftOffset = 4
+		local rightOffset = 4
+		local bottomOffset = 4
+		local barSpacing = 2
+
+		for _, barDef in ipairs(CustomBars) do
+			local barDrawings = drawings.Bars[barDef.Name]
+			if barDrawings then
+				-- Pass raw instance so bar authors can branch on Player vs Model
+				local curVal, maxVal = barDef.GetValue(char, instance)
+				maxVal = (maxVal and maxVal > 0) and maxVal or 100
+				local ratio = math.clamp((curVal or 0) / maxVal, 0, 1)
+
+				local barWidth = barDef.Width or 2
+
+				if barDef.Side == "Right" then
+					local barX = boxX + width + rightOffset
+					rightOffset = rightOffset + barWidth + barSpacing + 2
+
+					barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
+					barDrawings.Outline.Size = Vector2.new(barWidth + 2, height + 2)
+
+					local barHeight = math.floor(height * ratio)
+					barDrawings.Fill.Position = Vector2.new(barX, boxY + (height - barHeight))
+					barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
+				elseif barDef.Side == "Bottom" then
+					local barY = boxY + height + bottomOffset
+					bottomOffset = bottomOffset + barWidth + barSpacing + 2
+
+					barDrawings.Outline.Position = Vector2.new(boxX - 1, barY - 1)
+					barDrawings.Outline.Size = Vector2.new(width + 2, barWidth + 2)
+
+					local fillWidth = math.floor(width * ratio)
+					barDrawings.Fill.Position = Vector2.new(boxX, barY)
+					barDrawings.Fill.Size = Vector2.new(fillWidth, barWidth)
+				elseif barDef.Side == "Left" then
+					leftOffset = leftOffset + barWidth
+					local barX = boxX - leftOffset
+					leftOffset = leftOffset + barSpacing + 2
+
+					barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
+					barDrawings.Outline.Size = Vector2.new(barWidth + 2, height + 2)
+
+					local barHeight = math.floor(height * ratio)
+					barDrawings.Fill.Position = Vector2.new(barX, boxY + (height - barHeight))
+					barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
+				end
+
+				if barDef.LerpColor then
+					barDrawings.Fill.Color = Color3.fromRGB(255, 0, 0):Lerp(Color3.fromRGB(0, 255, 0), ratio)
+				else
+					barDrawings.Fill.Color = barDef.Color or Color3.fromRGB(0, 255, 0)
+				end
+
+				barDrawings.Outline.Visible = true
+				barDrawings.Fill.Visible = (ratio > 0)
+			end
+		end
+	else
+		for _, barDrawings in pairs(drawings.Bars) do
+			barDrawings.Outline.Visible = false
+			barDrawings.Fill.Visible = false
+		end
+	end
+
+	-- 3. Build Dynamic Text
+	if getSetting(group, "ShowName") or getSetting(group, "ShowDistance") then
+		local textParts = {}
+
+		if getSetting(group, "ShowName") then
+			table.insert(textParts, target.GetName())
+		end
+
+		if getSetting(group, "ShowDistance") then
+			local distance = math.floor((Camera.CFrame.Position - root.Position).Magnitude)
+			table.insert(textParts, `[{distance}m]`)
+		end
+
+		local finalText = table.concat(textParts, " ")
+
+		if #finalText > 0 then
+			drawings.Name.Text = finalText
+			drawings.Name.Color = getSetting(group, "TextColor")
+			drawings.Name.Size = ESPConfig.TextSize
+			drawings.Name.Position = Vector2.new(rootPos.X, boxY - drawings.Name.Size - 4)
+			drawings.Name.Visible = true
+		else
+			drawings.Name.Visible = false
+		end
+	else
+		drawings.Name.Visible = false
+	end
+end
+
 -- Main Render Loop
 local renderConnection
 renderConnection = RunService.RenderStepped:Connect(function()
@@ -191,123 +488,12 @@ renderConnection = RunService.RenderStepped:Connect(function()
 	end
 
 	for instance, drawings in pairs(ESPObjects) do
-		local target = drawings.Target
-		local char, root, humanoid = isValidCharacter(target)
-
-		local isTeammate = ESPConfig.TeamCheck and LocalPlayer.Team ~= nil and target.GetTeam() == LocalPlayer.Team
-
-		if char and not isTeammate then
-			local rootPos, onScreen = Camera:WorldToViewportPoint(root.Position)
-
-			if onScreen then
-				local headPos = Camera:WorldToViewportPoint(root.Position + Vector3.new(0, 2.5, 0))
-				local legPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3.5, 0))
-
-				if headPos.Z > 0 and legPos.Z > 0 then
-					local height = math.abs(headPos.Y - legPos.Y)
-					local width = height / 1.6
-
-					local boxX = rootPos.X - (width / 2)
-					local boxY = math.min(headPos.Y, legPos.Y)
-
-					-- 1. Update Box
-					drawings.Box.Size = Vector2.new(width, height)
-					drawings.Box.Position = Vector2.new(boxX, boxY)
-					drawings.Box.Color = ESPConfig.BoxColor
-					drawings.Box.Visible = true
-
-					-- 2. Update Dynamic Bars (Automatic side-stacking)
-					local leftOffset = 4
-					local rightOffset = 4
-					local bottomOffset = 4
-					local barSpacing = 2
-
-					for _, barDef in ipairs(CustomBars) do
-						local barDrawings = drawings.Bars[barDef.Name]
-						if barDrawings then
-							-- Pass raw instance so bar authors can branch on Player vs Model
-							local curVal, maxVal = barDef.GetValue(char, instance)
-							maxVal = (maxVal and maxVal > 0) and maxVal or 100
-							local ratio = math.clamp((curVal or 0) / maxVal, 0, 1)
-
-							local barWidth = barDef.Width or 2
-
-							if barDef.Side == "Right" then
-								local barX = boxX + width + rightOffset
-								rightOffset = rightOffset + barWidth + barSpacing + 2
-
-								barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
-								barDrawings.Outline.Size = Vector2.new(barWidth + 2, height + 2)
-
-								local barHeight = math.floor(height * ratio)
-								barDrawings.Fill.Position = Vector2.new(barX, boxY + (height - barHeight))
-								barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
-							elseif barDef.Side == "Bottom" then
-								local barY = boxY + height + bottomOffset
-								bottomOffset = bottomOffset + barWidth + barSpacing + 2
-
-								barDrawings.Outline.Position = Vector2.new(boxX - 1, barY - 1)
-								barDrawings.Outline.Size = Vector2.new(width + 2, barWidth + 2)
-
-								local fillWidth = math.floor(width * ratio)
-								barDrawings.Fill.Position = Vector2.new(boxX, barY)
-								barDrawings.Fill.Size = Vector2.new(fillWidth, barWidth)
-							elseif barDef.Side == "Left" then
-								leftOffset = leftOffset + barWidth
-								local barX = boxX - leftOffset
-								leftOffset = leftOffset + barSpacing + 2
-
-								barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
-								barDrawings.Outline.Size = Vector2.new(barWidth + 2, height + 2)
-
-								local barHeight = math.floor(height * ratio)
-								barDrawings.Fill.Position = Vector2.new(barX, boxY + (height - barHeight))
-								barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
-							end
-
-							if barDef.LerpColor then
-								barDrawings.Fill.Color = Color3.fromRGB(255, 0, 0)
-									:Lerp(Color3.fromRGB(0, 255, 0), ratio)
-							else
-								barDrawings.Fill.Color = barDef.Color or Color3.fromRGB(0, 255, 0)
-							end
-
-							barDrawings.Outline.Visible = true
-							barDrawings.Fill.Visible = (ratio > 0)
-						end
-					end
-
-					-- 3. Build Dynamic Text
-					local textParts = {}
-
-					if ESPConfig.ShowName then
-						table.insert(textParts, target.GetName())
-					end
-
-					if ESPConfig.ShowDistance then
-						local distance = math.floor((Camera.CFrame.Position - root.Position).Magnitude)
-						table.insert(textParts, `[{distance}m]`)
-					end
-
-					local finalText = table.concat(textParts, " ")
-
-					if #finalText > 0 then
-						drawings.Name.Text = finalText
-						drawings.Name.Color = ESPConfig.TextColor
-						drawings.Name.Size = ESPConfig.TextSize
-						drawings.Name.Position = Vector2.new(rootPos.X, boxY - drawings.Name.Size - 4)
-						drawings.Name.Visible = true
-					else
-						drawings.Name.Visible = false
-					end
-				else
-					hideESP(drawings)
-				end
-			else
-				hideESP(drawings)
-			end
-		else
+		local ok, err = pcall(updateTarget, instance, drawings)
+		if not ok then
+			-- Isolate failures (e.g. target destroyed mid-frame) so one bad
+			-- target doesn't stop every other target from updating this frame
 			hideESP(drawings)
+			warn("[ESP] update failed for", instance, "-", err)
 		end
 	end
 end)
@@ -322,15 +508,29 @@ local function unload()
 		removeESP(instance)
 	end
 
-	-- Clear bar blueprints so a future re-require starts clean
+	-- Clear bar blueprints and classifiers so a future re-require starts clean
 	table.clear(CustomBars)
+	table.clear(GroupClassifiers)
 end
 
 -- Function to register a new bar
-local function NewBar(_, args)
+-- args.Groups (optional): array of group names this bar applies to
+-- (matches whatever names you registered via ESP:RegisterGroup, plus the
+-- built-in "Player"/"Mob"). Omit for "all groups".
+local function NewBar(selfOrArgs, args)
+	-- Accept both ESP:NewBar({...}) and ESP.NewBar({...}).
+	if args == nil then
+		args = selfOrArgs
+	end
+
 	assert(type(args) == "table", "NewBar expects a table of arguments")
 	assert(args.Name, "Bar must have a unique 'Name'")
 	assert(type(args.GetValue) == "function", "Bar must provide a 'GetValue(char, instance)' function")
+	assert(args.Groups == nil or type(args.Groups) == "table", "Bar 'Groups' must be an array of group names")
+
+	for _, def in ipairs(CustomBars) do
+		assert(def.Name ~= args.Name, "A bar named '" .. args.Name .. "' already exists")
+	end
 
 	local barDef = {
 		Name = args.Name,
@@ -339,6 +539,7 @@ local function NewBar(_, args)
 		Color = args.Color or Color3.fromRGB(0, 255, 0),
 		LerpColor = args.LerpColor or false,
 		GetValue = args.GetValue,
+		Groups = args.Groups, -- nil = applies to every group
 	}
 
 	table.insert(CustomBars, barDef)
@@ -346,7 +547,7 @@ local function NewBar(_, args)
 	-- Immediately create drawing objects for targets already tracked
 	for _, drawings in pairs(ESPObjects) do
 		if not drawings.Bars[barDef.Name] then
-			createBarForPlayer(drawings, barDef)
+			createBarForPlayer(drawings, barDef, drawings.Target.Group)
 		end
 	end
 
@@ -379,4 +580,7 @@ return {
 	Track = createESP,
 	Untrack = removeESP,
 	Unload = unload,
+	RegisterGroup = RegisterGroup,
+	UnregisterGroup = UnregisterGroup,
+	RefreshGroup = RefreshGroup,
 }

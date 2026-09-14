@@ -26,7 +26,14 @@ local SaveManager = assert(loadstring(game:HttpGet(repo .. "addons/SaveManager.l
 -- 2. Load ESP and extract Config & Objects directly!
 local ESP = assert(loadstring(game:HttpGet("https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/Esp.Lua")))()
 local ESPConfig = ESP.Config
-local ESPObjects = ESP.Objects
+
+-- Group overrides are optional. Values set here override ESPConfig globals.
+local ESPGroups = ESPConfig.Groups
+ESPGroups.Player = ESPGroups.Player or {}
+ESPGroups.Monster = ESPGroups.Monster or {}
+ESPGroups.NPC = ESPGroups.NPC or {}
+ESPGroups.Drop = ESPGroups.Drop or {}
+ESPGroups.Chest = ESPGroups.Chest or {}
 
 -- Linoria's global Options & Toggles tables
 
@@ -51,7 +58,7 @@ local Tabs = {
 local watchedFolders = {}
 local watchedInstanceName = {}
 
-local function watchInstanceName(Instancename)
+local function watchInstanceName(Instancename, groupName)
 	if not Instancename then
 		return
 	end
@@ -61,20 +68,20 @@ local function watchInstanceName(Instancename)
 	end
 
 	for _, m in ipairs(workspace:GetDescendants()) do
-		if m.Name == watchedInstanceName then
-			ESP.Track(m)
+		if m.Name == Instancename then
+			ESP.Track(m, groupName)
 		end
 	end
 
 	watchedInstanceName[Instancename] = {
 		added = workspace.DescendantAdded:Connect(function(m)
 			if m.Name == Instancename then
-				ESP.Track(m)
+				ESP.Track(m, groupName)
 			end
 		end),
 		removed = workspace.DescendantRemoving:Connect(function(m)
 			if m.Name == Instancename then
-				ESP.Track(m)
+				ESP.Untrack(m)
 			end
 		end),
 	}
@@ -98,7 +105,7 @@ local function unwatchInstanceName(Instancename)
 	end
 end
 
-local function watchFolder(folder)
+local function watchFolder(folder, groupName)
 	if not folder then
 		return
 	end
@@ -108,12 +115,12 @@ local function watchFolder(folder)
 	end
 
 	for _, m in ipairs(folder:GetChildren()) do
-		ESP.Track(m)
+		ESP.Track(m, groupName)
 	end
 
 	watchedFolders[folder] = {
 		added = folder.ChildAdded:Connect(function(m)
-			ESP.Track(m)
+			ESP.Track(m, groupName)
 		end),
 		removed = folder.ChildRemoved:Connect(function(m)
 			ESP.Untrack(m)
@@ -208,7 +215,7 @@ VisualGeneral:AddToggle("Mob_ESP", {
 	Callback = function(Value)
 		local folder = workspace:FindFirstChild("Monsters")
 		if Value then
-			watchFolder(folder)
+			watchFolder(folder, "Monster")
 		else
 			unwatchFolder(folder)
 		end
@@ -221,7 +228,7 @@ VisualGeneral:AddToggle("NPC_ESP", {
 	Callback = function(Value)
 		local folder = workspace:FindFirstChild("NPCs")
 		if Value then
-			watchFolder(folder)
+			watchFolder(folder, "NPC")
 		else
 			unwatchFolder(folder)
 		end
@@ -234,7 +241,7 @@ VisualGeneral:AddToggle("Drop_Esp", {
 	Callback = function(Value)
 		local folder = workspace:FindFirstChild("Drops")
 		if Value then
-			watchFolder(folder)
+			watchFolder(folder, "Drop")
 		else
 			unwatchFolder(folder)
 		end
@@ -246,7 +253,7 @@ VisualGeneral:AddToggle("Chest_ESP", {
 	Default = false,
 	Callback = function(Value)
 		if Value then
-			watchInstanceName("Chest")
+			watchInstanceName("Chest", "Chest")
 		else
 			unwatchInstanceName("Chest")
 		end
@@ -291,7 +298,7 @@ ESP:NewBar({
 -- ============ 1. Track players ============
 local function trackPlayer(player)
 	if player ~= Players.LocalPlayer then
-		ESP.Track(player)
+		ESP.Track(player, "Player")
 	end
 end
 
@@ -309,10 +316,6 @@ ESP.NewBar({
 	Side = "Left",
 	Width = 3,
 	LerpColor = true,
-
-	Filter = function(instance)
-		return instance:IsA("Model")
-	end,
 
 	GetValue = function(char, instance)
 		local hum = char:FindFirstChildOfClass("Humanoid")
