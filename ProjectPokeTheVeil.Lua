@@ -28,12 +28,21 @@ local ESP = assert(loadstring(game:HttpGet("https://raw.githubusercontent.com/po
 local ESPConfig = ESP.Config
 
 -- Group overrides are optional. Values set here override ESPConfig globals.
-local ESPGroups = ESPConfig.Groups
+local ESPGroups = ESPConfig.Groups or {}
+ESPConfig.Groups = ESPGroups
+ESPConfig.BarColor = ESPConfig.BarColor or Color3.fromRGB(0, 255, 0)
 ESPGroups.Player = ESPGroups.Player or {}
 ESPGroups.Monster = ESPGroups.Monster or {}
 ESPGroups.NPC = ESPGroups.NPC or {}
 ESPGroups.Drop = ESPGroups.Drop or {}
 ESPGroups.Chest = ESPGroups.Chest or {}
+
+ESPGroups.NPC.ShowHealth = false
+ESPGroups.NPC.ShowBox = false
+ESPGroups.Chest.ShowHealth = false
+ESPGroups.Drop.ShowHealth = false
+ESPGroups.Drop.ShowBox = false
+ESPGroups.Chest.ShowBox = false
 
 -- Linoria's global Options & Toggles tables
 
@@ -146,10 +155,112 @@ end
 
 -- watchFolder(Workspace:FindFirstChild("NPCs"))  -- add more folders as needed
 
+-------------------------------- Main Tab --------------------------------
+local TabBox = Tabs.Main:AddLeftTabbox()
+local General = TabBox:AddTab("General")
+local MainSettings = TabBox:AddTab("Settings")
+
+local SpeedConnection
+local Speed = 20
+
+General:AddToggle("Speed", {
+	Text = "Speed",
+	Default = false,
+	Callback = function(Value)
+		if Value then
+			task.spawn(function()
+				SpeedConnection = RunService.Heartbeat:Connect(function()
+					local player = game:GetService("Players")
+					local humanoid = player.Character:FindFirstChild("Humanoid")
+					local root = player.Character:FindFirstChild("HumanoidRootPart")
+					local dir = humanoid.MoveDirection
+					if dir.Magnitude > 0 then
+						local speed = humanoid.WalkSpeed + Speed
+						local current = root.AssemblyLinearVelocity
+						root.AssemblyLinearVelocity = Vector3.new(dir.X * speed, current.Y, dir.Z * speed)
+					end
+				end)
+			end)
+		else
+			if SpeedConnection then
+				SpeedConnection:Disconnect()
+			end
+		end
+	end,
+}):AddKeyPicker("Speed_Toggle", {
+	Default = "F1",
+	Mode = "Toggle",
+	Text = "Toggle Speed",
+	SyncToggleState = true,
+	NoUI = false,
+})
+
+MainSettings:AddSlider("SpeedSlider", {
+	Text = "Speed",
+	Default = Speed,
+	Min = 1,
+	Max = 70,
+	Rounding = 0,
+	Compact = false,
+
+	Callback = function(Value)
+		Speed = Value
+	end,
+})
+
 -------------------------------- Visual Tab --------------------------------
 local VisualTabBox = Tabs.Visual:AddLeftTabbox()
 local VisualGeneral = VisualTabBox:AddTab("General")
 local VisualSettings = VisualTabBox:AddTab("Settings")
+
+local GroupSettings = VisualSettings
+
+local function addGroupToggle(groupName, key, label)
+	local config = ESPGroups[groupName]
+	local optionName = "ESP_" .. groupName .. "_" .. key
+	local defaultValue = config[key]
+	local colorKey
+	local defaultColor = Color3.new(1, 1, 1)
+
+	if defaultValue == nil then
+		defaultValue = ESPConfig[key]
+	end
+
+	if key == "ShowBox" then
+		colorKey = "BoxColor"
+	elseif key == "ShowHealth" then
+		colorKey = "BarColor"
+	else
+		colorKey = "TextColor"
+	end
+
+	defaultColor = config[colorKey] or ESPConfig[colorKey] or defaultColor
+
+	GroupSettings:AddToggle(optionName, {
+		Text = groupName .. " - " .. label,
+		Default = defaultValue,
+		Callback = function(value)
+			config[key] = value
+		end,
+	}):AddColorPicker(`{optionName}_Color`, {
+		Default = defaultColor,
+		Title = "Color",
+		Callback = function(Value)
+			config[colorKey] = Value
+		end,
+	})
+end
+
+for _, groupName in ipairs({ "Player", "Monster", "NPC", "Drop", "Chest" }) do
+	addGroupToggle(groupName, "ShowName", "Name")
+	addGroupToggle(groupName, "ShowDistance", "Distance")
+	if groupName == "NPC" or groupName == "Drop" or groupName == "Chest" then
+		continue
+	else
+		addGroupToggle(groupName, "ShowHealth", "Health Bar")
+		addGroupToggle(groupName, "ShowBox", "Box")
+	end
+end
 
 -- Master ESP Toggle with Box Colorpicker attached
 VisualGeneral:AddToggle("ESP_Enabled", {
@@ -302,9 +413,10 @@ local function trackPlayer(player)
 	end
 end
 
-for _, player in ipairs(Players:GetPlayers()) do
-	trackPlayer(player)
+for _, p in ipairs(Players:GetPlayers()) do
+	trackPlayer(p)
 end
+
 Players.PlayerAdded:Connect(trackPlayer)
 Players.PlayerRemoving:Connect(function(player)
 	ESP.Untrack(player)

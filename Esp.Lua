@@ -21,6 +21,7 @@ local ESPConfig = {
 	ShowBars = true,
 	ShowHealth = true,
 	TeamCheck = false,
+	BarColor = Color3.fromRGB(0, 255, 0),
 
 	-- Per-group overrides. Any key set here wins over the global default
 	-- above, for targets whose resolved Group matches this key.
@@ -68,7 +69,7 @@ local function resolveGroup(instance)
 	if instance:IsA("Player") then
 		return "Player"
 	end
-	return "Mob"
+	return "Anything"
 end
 
 -- Register a new group classifier from external code.
@@ -431,7 +432,10 @@ local function updateTarget(instance, drawings)
 					barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
 				end
 
-				if barDef.LerpColor then
+				local groupBarColor = getSetting(group, "BarColor")
+				if groupBarColor then
+					barDrawings.Fill.Color = groupBarColor
+				elseif barDef.LerpColor then
 					barDrawings.Fill.Color = Color3.fromRGB(255, 0, 0):Lerp(Color3.fromRGB(0, 255, 0), ratio)
 				else
 					barDrawings.Fill.Color = barDef.Color or Color3.fromRGB(0, 255, 0)
