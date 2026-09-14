@@ -23,45 +23,13 @@ local Library = assert(loadstring(game:HttpGet(repo .. "Library.lua")))()
 local ThemeManager = assert(loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua")))()
 local SaveManager = assert(loadstring(game:HttpGet(repo .. "addons/SaveManager.lua")))()
 
--- 2. Load ESP Module
+-- 2. Load ESP and extract Config & Objects directly!
 local ESP = assert(loadstring(game:HttpGet("https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/Esp.Lua")))()
 local ESPConfig = ESP.Config
+local ESPObjects = ESP.Objects
 
-------------------------------------------------------------------------
--- 3. Group Setup & Auto-Resolver
-------------------------------------------------------------------------
--- Configure default initial settings for Player and Mob groups
-ESP.SetGroupConfig("Players", {
-	Enabled = true,
-	ShowBox = true,
-	ShowName = true,
-	ShowDistance = true,
-	BoxColor = Color3.fromRGB(0, 255, 150),
-	TextColor = Color3.fromRGB(255, 255, 255),
-})
+-- Linoria's global Options & Toggles tables
 
-ESP.SetGroupConfig("Mobs", {
-	Enabled = true,
-	ShowBox = false, -- Box off for mobs by default
-	ShowName = true,
-	ShowDistance = true,
-	BoxColor = Color3.fromRGB(255, 170, 0),
-	TextColor = Color3.fromRGB(255, 170, 0),
-})
-
--- Automatically sort tracked targets into "Players" or "Mobs"
-ESP.SetGroupResolver(function(instance)
-	if instance:IsA("Player") then
-		return "Players"
-	elseif instance:IsA("Model") and instance:FindFirstChildOfClass("Humanoid") then
-		return "Mobs"
-	end
-	return "Default"
-end)
-
-------------------------------------------------------------------------
--- 4. UI Window & Tabs Setup
-------------------------------------------------------------------------
 local Window = Library:CreateWindow({
 	Title = "Project Poke",
 	Center = true,
@@ -77,115 +45,253 @@ local Tabs = {
 	["UI Settings"] = Window:AddTab("UI Settings"),
 }
 
+-- Functions
+
+-- ============ 2. Track mobs ============
+local watchedFolders = {}
+local watchedInstanceName = {}
+
+local function watchInstanceName(Instancename)
+	if not Instancename then
+		return
+	end
+
+	if watchedInstanceName[Instancename] then
+		return
+	end
+
+	for _, m in ipairs(workspace:GetDescendants()) do
+		if m.Name == watchedInstanceName then
+			ESP.Track(m)
+		end
+	end
+
+	watchedInstanceName[Instancename] = {
+		added = workspace.DescendantAdded:Connect(function(m)
+			if m.Name == Instancename then
+				ESP.Track(m)
+			end
+		end),
+		removed = workspace.DescendantRemoving:Connect(function(m)
+			if m.Name == Instancename then
+				ESP.Track(m)
+			end
+		end),
+	}
+end
+
+local function unwatchInstanceName(Instancename)
+	local rec = watchedInstanceName[Instancename]
+	if not rec then
+		return
+	end
+	rec.added:Disconnect()
+	rec.removed:Disconnect()
+	watchedInstanceName[Instancename] = nil
+
+	if Instancename then
+		for _, m in ipairs(workspace:GetDescendants()) do
+			if m.Name == Instancename then
+				ESP.Untrack(m)
+			end
+		end
+	end
+end
+
+local function watchFolder(folder)
+	if not folder then
+		return
+	end
+
+	if watchedFolders[folder] then
+		return
+	end
+
+	for _, m in ipairs(folder:GetChildren()) do
+		ESP.Track(m)
+	end
+
+	watchedFolders[folder] = {
+		added = folder.ChildAdded:Connect(function(m)
+			ESP.Track(m)
+		end),
+		removed = folder.ChildRemoved:Connect(function(m)
+			ESP.Untrack(m)
+		end),
+	}
+end
+
+local function unwatchFolder(folder)
+	local rec = watchedFolders[folder]
+	if not rec then
+		return
+	end
+	rec.added:Disconnect()
+	rec.removed:Disconnect()
+	watchedFolders[folder] = nil
+
+	if folder then
+		for _, m in ipairs(folder:GetChildren()) do
+			ESP.Untrack(m)
+		end
+	end
+end
+
+-- watchFolder(Workspace:FindFirstChild("NPCs"))  -- add more folders as needed
+
 -------------------------------- Visual Tab --------------------------------
-local PlayersGroupbox = Tabs.Visual:AddLeftGroupbox("Player ESP")
-local MobsGroupbox = Tabs.Visual:AddRightGroupbox("Mob ESP")
+local VisualTabBox = Tabs.Visual:AddLeftTabbox()
+local VisualGeneral = VisualTabBox:AddTab("General")
+local VisualSettings = VisualTabBox:AddTab("Settings")
 
--- ==================== Player ESP Settings ====================
-PlayersGroupbox:AddToggle("Player_Enabled", {
-	Text = "Enable Player ESP",
-	Default = true,
+-- Master ESP Toggle with Box Colorpicker attached
+VisualGeneral:AddToggle("ESP_Enabled", {
+	Text = "Enable ESP",
+	Default = ESPConfig.Enabled,
+	Tooltip = "Toggle all player ESP visuals",
 	Callback = function(Value)
-		ESP.SetGroupConfig("Players", { Enabled = Value })
+		ESPConfig.Enabled = Value
 	end,
-})
-
-PlayersGroupbox:AddToggle("Player_ShowBox", {
-	Text = "Show Box",
-	Default = true,
-	Callback = function(Value)
-		ESP.SetGroupConfig("Players", { ShowBox = Value })
-	end,
-}):AddColorPicker("Player_BoxColor", {
-	Default = Color3.fromRGB(0, 255, 150),
+}):AddColorPicker("ESP_BoxColor", {
+	Default = ESPConfig.BoxColor,
 	Title = "Box Color",
 	Callback = function(Value)
-		ESP.SetGroupConfig("Players", { BoxColor = Value })
+		ESPConfig.BoxColor = Value
 	end,
 })
 
-PlayersGroupbox:AddToggle("Player_ShowName", {
+-- Name Toggle with Text Colorpicker attached
+VisualGeneral:AddToggle("ESP_ShowName", {
 	Text = "Show Name",
-	Default = true,
+	Default = ESPConfig.ShowName or true,
 	Callback = function(Value)
-		ESP.SetGroupConfig("Players", { ShowName = Value })
+		ESPConfig.ShowName = Value
 	end,
-}):AddColorPicker("Player_TextColor", {
-	Default = Color3.fromRGB(255, 255, 255),
+}):AddColorPicker("ESP_TextColor", {
+	Default = ESPConfig.TextColor,
 	Title = "Text Color",
 	Callback = function(Value)
-		ESP.SetGroupConfig("Players", { TextColor = Value })
+		ESPConfig.TextColor = Value
 	end,
 })
 
-PlayersGroupbox:AddToggle("Player_ShowDistance", {
+-- Display Name Toggle
+VisualGeneral:AddToggle("ESP_DisplayName", {
+	Text = "Use Display Name",
+	Default = ESPConfig.UseDisplayName or true,
+	Callback = function(Value)
+		ESPConfig.UseDisplayName = Value
+	end,
+})
+
+-- Health % Toggle
+VisualGeneral:AddToggle("ESP_ShowHealth", {
+	Text = "Show Health %",
+	Default = ESPConfig.ShowHealth or true,
+	Callback = function(Value)
+		ESPConfig.ShowHealth = Value
+	end,
+})
+
+-- Distance Toggle
+VisualGeneral:AddToggle("ESP_ShowDistance", {
 	Text = "Show Distance",
-	Default = true,
+	Default = ESPConfig.ShowDistance,
 	Callback = function(Value)
-		ESP.SetGroupConfig("Players", { ShowDistance = Value })
+		ESPConfig.ShowDistance = Value
 	end,
 })
 
-PlayersGroupbox:AddToggle("ESP_TeamCheck", {
-	Text = "Team Check",
-	Default = ESPConfig.TeamCheck or false,
+VisualGeneral:AddToggle("Mob_ESP", {
+	Text = "Mob Esp",
+	Default = false,
 	Callback = function(Value)
-		ESPConfig.TeamCheck = Value
+		local folder = workspace:FindFirstChild("Monsters")
+		if Value then
+			watchFolder(folder)
+		else
+			unwatchFolder(folder)
+		end
 	end,
 })
 
--- ==================== Mob ESP Settings ====================
-MobsGroupbox:AddToggle("Mob_Enabled", {
-	Text = "Enable Mob ESP",
-	Default = true,
+VisualGeneral:AddToggle("NPC_ESP", {
+	Text = "Npc Esp",
+	Default = false,
 	Callback = function(Value)
-		ESP.SetGroupConfig("Mobs", { Enabled = Value })
+		local folder = workspace:FindFirstChild("NPCs")
+		if Value then
+			watchFolder(folder)
+		else
+			unwatchFolder(folder)
+		end
 	end,
 })
 
-MobsGroupbox:AddToggle("Mob_ShowBox", {
-	Text = "Show Box",
-	Default = false, -- Specifically toggle box off for mobs
+VisualGeneral:AddToggle("Drop_Esp", {
+	Text = "Drop Esp",
+	Default = false,
 	Callback = function(Value)
-		ESP.SetGroupConfig("Mobs", { ShowBox = Value })
-	end,
-}):AddColorPicker("Mob_BoxColor", {
-	Default = Color3.fromRGB(255, 170, 0),
-	Title = "Box Color",
-	Callback = function(Value)
-		ESP.SetGroupConfig("Mobs", { BoxColor = Value })
-	end,
-})
-
-MobsGroupbox:AddToggle("Mob_ShowName", {
-	Text = "Show Name",
-	Default = true,
-	Callback = function(Value)
-		ESP.SetGroupConfig("Mobs", { ShowName = Value })
-	end,
-}):AddColorPicker("Mob_TextColor", {
-	Default = Color3.fromRGB(255, 170, 0),
-	Title = "Text Color",
-	Callback = function(Value)
-		ESP.SetGroupConfig("Mobs", { TextColor = Value })
+		local folder = workspace:FindFirstChild("Drops")
+		if Value then
+			watchFolder(folder)
+		else
+			unwatchFolder(folder)
+		end
 	end,
 })
 
-MobsGroupbox:AddToggle("Mob_ShowDistance", {
-	Text = "Show Distance",
-	Default = true,
+VisualGeneral:AddToggle("Chest_ESP", {
+	Text = "Chest Esp",
+	Default = false,
 	Callback = function(Value)
-		ESP.SetGroupConfig("Mobs", { ShowDistance = Value })
+		if Value then
+			watchInstanceName("Chest")
+		else
+			unwatchInstanceName("Chest")
+		end
 	end,
 })
 
-------------------------------------------------------------------------
--- 5. Entity Tracking Connections
-------------------------------------------------------------------------
--- Track Players
+local Original_Density = 0.7
+local RemoveFogConnection
+
+VisualGeneral:AddToggle("Remove_Fog", {
+	Text = "No Fog",
+	Default = false,
+
+	Callback = function(Value)
+		if Value then
+			RemoveFogConnection = RunService.RenderStepped:Connect(function()
+				game.Lighting.Atmosphere.Density = 0
+			end)
+		else
+			if RemoveFogConnection then
+				RemoveFogConnection:Disconnect()
+			end
+
+			game.Lighting.Atmosphere.Density = Original_Density
+		end
+	end,
+})
+
+--[[
+ESP:NewBar({
+	Name = "Health",
+	Side = "Left",
+	Width = 2,
+	LerpColor = true,
+	GetValue = function(char, player)
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		return hum and hum.Health or 0, hum and hum.MaxHealth or 100
+	end,
+})
+]]
+
+-- ============ 1. Track players ============
 local function trackPlayer(player)
 	if player ~= Players.LocalPlayer then
-		ESP:Track(player)
+		ESP.Track(player)
 	end
 end
 
@@ -194,35 +300,20 @@ for _, player in ipairs(Players:GetPlayers()) do
 end
 Players.PlayerAdded:Connect(trackPlayer)
 Players.PlayerRemoving:Connect(function(player)
-	ESP:Untrack(player)
+	ESP.Untrack(player)
 end)
 
--- Track Mobs Folder
-local function watchFolder(folder)
-	if not folder then
-		return
-	end
-	for _, m in ipairs(folder:GetChildren()) do
-		ESP:Track(m)
-	end
-	folder.ChildAdded:Connect(function(m)
-		ESP:Track(m)
-	end)
-	folder.ChildRemoved:Connect(function(m)
-		ESP:Untrack(m)
-	end)
-end
-
-watchFolder(workspace:FindFirstChild("Monsters"))
-
-------------------------------------------------------------------------
--- 6. Register Custom Health Bar
-------------------------------------------------------------------------
-ESP:NewBar({
+-- ============ 4. Register bars ============
+ESP.NewBar({
 	Name = "Health",
 	Side = "Left",
 	Width = 3,
 	LerpColor = true,
+
+	Filter = function(instance)
+		return instance:IsA("Model")
+	end,
+
 	GetValue = function(char, instance)
 		local hum = char:FindFirstChildOfClass("Humanoid")
 		if hum then
@@ -231,6 +322,14 @@ ESP:NewBar({
 		return instance:GetAttribute("Health") or 0, instance:GetAttribute("MaxHealth") or 100
 	end,
 })
+
+-- ============ 5. Cleanup ============
+-- Example: hook into a UI button, or call ESP:Unload() manually.
+-- game:GetService("UserInputService").InputBegan:Connect(function(input)
+--     if input.KeyCode == Enum.KeyCode.Delete then
+--         ESP:Unload()
+--     end
+-- end)
 
 -------------------------------- UI Settings Tab & Watermark --------------------------------
 Library:SetWatermarkVisibility(true)
@@ -257,12 +356,12 @@ end))
 
 Library.KeybindFrame.Visible = true
 
--- Unload handler
+-- Unload handler: clean up connections and Drawing objects
 Library:OnUnload(function()
 	Library.Unloaded = true
 	disconnectConnections()
 	if ESP and ESP.Unload then
-		ESP:Unload()
+		ESP.Unload()
 	end
 end)
 
