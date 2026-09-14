@@ -21,8 +21,7 @@ local ESPConfig = {
 }
 
 local ESPObjects = {} -- [Instance] = drawings
-local CustomBars = {} -- Stores bar blueprints registered via ESP:NewBar
-local MobConns = {} -- Connections for the mob folder
+local CustomBars = {} -- Stores bar blueprints registered via ESP.NewBar
 
 -- Helper: Destroy a drawing safely
 local function safeDestroy(drawing)
@@ -323,10 +322,13 @@ local function unload()
 	for instance, _ in pairs(ESPObjects) do
 		removeESP(instance)
 	end
+
+	-- Clear bar blueprints so a future re-require starts clean
+	table.clear(CustomBars)
 end
 
--- Function to register a new bar
-local function NewBar(_, args)
+-- Function to register a new bar (call with dot syntax: ESP.NewBar({...}))
+local function NewBar(args)
 	assert(type(args) == "table", "NewBar expects a table of arguments")
 	assert(args.Name, "Bar must have a unique 'Name'")
 	assert(type(args.GetValue) == "function", "Bar must provide a 'GetValue(char, instance)' function")
@@ -369,8 +371,7 @@ local function NewBar(_, args)
 	}
 end
 
--- Return the module table
--- Public API
+-- Public API (call with dot syntax: ESP.Track(x), ESP.NewBar({...}), etc.)
 return {
 	Config = ESPConfig,
 	Objects = ESPObjects,

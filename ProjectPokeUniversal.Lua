@@ -159,7 +159,6 @@ local function watchFolder(folder)
 	end)
 end
 
-watchFolder(workspace:FindFirstChild("Monsters"))
 -- watchFolder(Workspace:FindFirstChild("NPCs"))  -- add more folders as needed
 
 -- ============ 4. Register bars ============
