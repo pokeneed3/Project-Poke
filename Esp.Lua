@@ -13,26 +13,51 @@ local ESPConfig = {
 	TextColor = Color3.fromRGB(255, 255, 255),
 	TextSize = 14,
 
-	-- Health Bar Settings
-	ShowHealthBar = true,
-	HealthBarSide = "Left", -- Options: "Left" or "Right"
-	HealthBarWidth = 2, -- Bar thickness in pixels
-	HealthBarOffset = 4, -- Distance away from bounding box in pixels
-	HealthBarLerpColor = true, -- True: Red -> Yellow -> Green gradient; False: solid green
-	HealthBarColor = Color3.fromRGB(0, 255, 0), -- Fallback if lerp is false
-
-	-- Toggles
+	-- Toggles (text)
 	ShowName = true,
 	UseDisplayName = true,
 	ShowDistance = true,
-	ShowHealth = true, -- Header text percentage
 	TeamCheck = false,
 }
 
--- Storage table for player ESP objects
 local ESPObjects = {}
+local CustomBars = {} -- Stores bar blueprints registered via ESP:NewBar
 
--- Function to create Drawing primitives for a player
+-- Helper: Destroy a drawing safely
+local function safeDestroy(drawing)
+	if drawing then
+		drawing.Visible = false
+		local destroyFn = drawing.Destroy or drawing.Remove
+		if destroyFn then
+			destroyFn(drawing)
+		end
+	end
+end
+
+-- Helper: Instantiates a single bar's drawing primitives for a player
+local function createBarForPlayer(playerDrawings, barDef)
+	local outline = Drawing.new("Square")
+	outline.Visible = false
+	outline.Color = Color3.fromRGB(0, 0, 0)
+	outline.Thickness = 1
+	outline.Filled = true
+	outline.Transparency = 0.8
+	outline.ZIndex = 2
+
+	local fill = Drawing.new("Square")
+	fill.Visible = false
+	fill.Color = barDef.Color or Color3.fromRGB(0, 255, 0)
+	fill.Thickness = 1
+	fill.Filled = true
+	fill.Transparency = 1
+	fill.ZIndex = 3
+
+	playerDrawings.Bars[barDef.Name] = {
+		Outline = outline,
+		Fill = fill,
+	}
+end
+
 local function createESP(player)
 	if player == LocalPlayer then
 		return
@@ -41,8 +66,7 @@ local function createESP(player)
 	local drawings = {
 		Box = Drawing.new("Square"),
 		Name = Drawing.new("Text"),
-		HealthBarOutline = Drawing.new("Square"),
-		HealthBar = Drawing.new("Square"),
+		Bars = {}, -- Holds all dynamic bars for this player
 	}
 
 	-- Configure Box
@@ -62,32 +86,24 @@ local function createESP(player)
 	drawings.Name.OutlineColor = Color3.fromRGB(0, 0, 0)
 	drawings.Name.ZIndex = 4
 
-	-- Configure Health Bar Outline (Dark border/background)
-	drawings.HealthBarOutline.Visible = false
-	drawings.HealthBarOutline.Color = Color3.fromRGB(0, 0, 0) -- Fixed: was RGB(255, 254, 254)
-	drawings.HealthBarOutline.Thickness = 1
-	drawings.HealthBarOutline.Filled = true
-	drawings.HealthBarOutline.Transparency = 0.8
-	drawings.HealthBarOutline.ZIndex = 2
+	-- Build primitives for any bars registered before this player joined
+	for _, barDef in ipairs(CustomBars) do
+		createBarForPlayer(drawings, barDef)
+	end
 
-	-- Configure Health Bar Fill
-	drawings.HealthBar.Visible = false
-	drawings.HealthBar.Color = Color3.fromRGB(0, 255, 0)
-	drawings.HealthBar.Thickness = 1
-	drawings.HealthBar.Filled = true
-	drawings.HealthBar.Transparency = 1
-	drawings.HealthBar.ZIndex = 3
-	--a
 	ESPObjects[player] = drawings
 end
 
--- Cleanup function to destroy Drawing objects and avoid memory leaks
 local function removeESP(player)
 	if ESPObjects[player] then
-		for _, drawing in pairs(ESPObjects[player]) do
-			drawing.Visible = false
-			drawing:Destroy()
+		safeDestroy(ESPObjects[player].Box)
+		safeDestroy(ESPObjects[player].Name)
+
+		for _, barDrawings in pairs(ESPObjects[player].Bars) do
+			safeDestroy(barDrawings.Outline)
+			safeDestroy(barDrawings.Fill)
 		end
+
 		ESPObjects[player] = nil
 	end
 end
@@ -112,8 +128,10 @@ end
 local function hideESP(drawings)
 	drawings.Box.Visible = false
 	drawings.Name.Visible = false
-	drawings.HealthBarOutline.Visible = false
-	drawings.HealthBar.Visible = false
+	for _, barDrawings in pairs(drawings.Bars) do
+		barDrawings.Outline.Visible = false
+		barDrawings.Fill.Visible = false
+	end
 end
 
 -- Main Render Loop
@@ -137,13 +155,12 @@ renderConnection = RunService.RenderStepped:Connect(function()
 				local headPos = Camera:WorldToViewportPoint(root.Position + Vector3.new(0, 2.5, 0))
 				local legPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3.5, 0))
 
-				-- Prevent inverted coordinates when near camera clip plane
 				if headPos.Z > 0 and legPos.Z > 0 then
 					local height = math.abs(headPos.Y - legPos.Y)
 					local width = height / 1.6
 
 					local boxX = rootPos.X - (width / 2)
-					local boxY = math.min(headPos.Y, legPos.Y) -- Fixed vertical centering
+					local boxY = math.min(headPos.Y, legPos.Y)
 
 					-- 1. Update Box
 					drawings.Box.Size = Vector2.new(width, height)
@@ -151,41 +168,70 @@ renderConnection = RunService.RenderStepped:Connect(function()
 					drawings.Box.Color = ESPConfig.BoxColor
 					drawings.Box.Visible = true
 
-					-- 2. Update Health Bar
-					local maxHealth = humanoid.MaxHealth > 0 and humanoid.MaxHealth or 100
-					local healthRatio = math.clamp(humanoid.Health / maxHealth, 0, 1)
+					-- 2. Update Dynamic Bars (Automatic side-stacking)
+					local leftOffset = 4
+					local rightOffset = 4
+					local bottomOffset = 4
+					local barSpacing = 2
 
-					if ESPConfig.ShowHealthBar then
-						local barWidth = ESPConfig.HealthBarWidth
-						local offset = ESPConfig.HealthBarOffset
-						local barX
+					for _, barDef in ipairs(CustomBars) do
+						local barDrawings = drawings.Bars[barDef.Name]
+						if barDrawings then
+							local curVal, maxVal = barDef.GetValue(char, player)
+							maxVal = (maxVal and maxVal > 0) and maxVal or 100
+							local ratio = math.clamp((curVal or 0) / maxVal, 0, 1)
 
-						if ESPConfig.HealthBarSide == "Right" then
-							barX = boxX + width + offset
-						else
-							barX = boxX - offset - barWidth
+							local barWidth = barDef.Width or 2
+
+							if barDef.Side == "Right" then
+								local barX = boxX + width + rightOffset
+								rightOffset = rightOffset + barWidth + barSpacing + 2
+
+								-- Outline
+								barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
+								barDrawings.Outline.Size = Vector2.new(barWidth + 2, height + 2)
+
+								-- Vertical Fill
+								local barHeight = math.floor(height * ratio)
+								barDrawings.Fill.Position = Vector2.new(barX, boxY + (height - barHeight))
+								barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
+							elseif barDef.Side == "Bottom" then
+								local barY = boxY + height + bottomOffset
+								bottomOffset = bottomOffset + barWidth + barSpacing + 2
+
+								-- Outline
+								barDrawings.Outline.Position = Vector2.new(boxX - 1, barY - 1)
+								barDrawings.Outline.Size = Vector2.new(width + 2, barWidth + 2)
+
+								-- Horizontal Fill
+								local fillWidth = math.floor(width * ratio)
+								barDrawings.Fill.Position = Vector2.new(boxX, barY)
+								barDrawings.Fill.Size = Vector2.new(fillWidth, barWidth)
+							elseif barDef.Side == "Left" then
+								leftOffset = leftOffset + barWidth
+								local barX = boxX - leftOffset
+								leftOffset = leftOffset + barSpacing + 2
+
+								-- Outline
+								barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
+								barDrawings.Outline.Size = Vector2.new(barWidth + 2, height + 2)
+
+								-- Vertical Fill
+								local barHeight = math.floor(height * ratio)
+								barDrawings.Fill.Position = Vector2.new(barX, boxY + (height - barHeight))
+								barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
+							end
+
+							if barDef.LerpColor then
+								barDrawings.Fill.Color = Color3.fromRGB(255, 0, 0)
+									:Lerp(Color3.fromRGB(0, 255, 0), ratio)
+							else
+								barDrawings.Fill.Color = barDef.Color or Color3.fromRGB(0, 255, 0)
+							end
+
+							barDrawings.Outline.Visible = true
+							barDrawings.Fill.Visible = (ratio > 0)
 						end
-
-						-- Background Outline
-						drawings.HealthBarOutline.Position = Vector2.new(barX - 1, boxY - 1)
-						drawings.HealthBarOutline.Size = Vector2.new(barWidth + 2, height + 2)
-						drawings.HealthBarOutline.Visible = true
-
-						-- Filled Bar
-						local barHeight = math.floor(height * healthRatio)
-						drawings.HealthBar.Position = Vector2.new(barX, boxY + (height - barHeight))
-						drawings.HealthBar.Size = Vector2.new(barWidth, barHeight)
-
-						if ESPConfig.HealthBarLerpColor then
-							drawings.HealthBar.Color = Color3.fromRGB(255, 0, 0)
-								:Lerp(Color3.fromRGB(0, 255, 0), healthRatio)
-						else
-							drawings.HealthBar.Color = ESPConfig.HealthBarColor
-						end
-						drawings.HealthBar.Visible = (barHeight > 0)
-					else
-						drawings.HealthBarOutline.Visible = false
-						drawings.HealthBar.Visible = false
 					end
 
 					-- 3. Build Dynamic Text
@@ -194,11 +240,6 @@ renderConnection = RunService.RenderStepped:Connect(function()
 					if ESPConfig.ShowName then
 						local nameStr = ESPConfig.UseDisplayName and player.DisplayName or ("@" .. player.Name)
 						table.insert(textParts, nameStr)
-					end
-
-					if ESPConfig.ShowHealth then
-						local healthPct = math.floor(healthRatio * 100)
-						table.insert(textParts, `[{healthPct}%]`)
 					end
 
 					if ESPConfig.ShowDistance then
@@ -258,9 +299,54 @@ local function unload()
 	end
 end
 
+-- Function to register a new bar
+local function NewBar(_, args)
+	assert(type(args) == "table", "NewBar expects a table of arguments")
+	assert(args.Name, "Bar must have a unique 'Name'")
+	assert(type(args.GetValue) == "function", "Bar must provide a 'GetValue(char, player)' function")
+
+	local barDef = {
+		Name = args.Name,
+		Side = args.Side or "Left", -- "Left", "Right", or "Bottom"
+		Width = args.Width or 2,
+		Color = args.Color or Color3.fromRGB(0, 255, 0),
+		LerpColor = args.LerpColor or false,
+		GetValue = args.GetValue,
+	}
+
+	table.insert(CustomBars, barDef)
+
+	-- Immediately create drawing objects for players already in the server
+	for _, drawings in pairs(ESPObjects) do
+		if not drawings.Bars[barDef.Name] then
+			createBarForPlayer(drawings, barDef)
+		end
+	end
+
+	-- Return handle to allow removing this bar later
+	return {
+		Remove = function()
+			for i, def in ipairs(CustomBars) do
+				if def.Name == barDef.Name then
+					table.remove(CustomBars, i)
+					break
+				end
+			end
+			for _, drawings in pairs(ESPObjects) do
+				if drawings.Bars[barDef.Name] then
+					safeDestroy(drawings.Bars[barDef.Name].Outline)
+					safeDestroy(drawings.Bars[barDef.Name].Fill)
+					drawings.Bars[barDef.Name] = nil
+				end
+			end
+		end,
+	}
+end
+
 -- Return the module table
 return {
 	Config = ESPConfig,
 	Objects = ESPObjects,
+	NewBar = NewBar,
 	Unload = unload,
 }

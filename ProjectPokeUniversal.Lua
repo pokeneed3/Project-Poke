@@ -117,6 +117,17 @@ VisualGeneral:AddToggle("ESP_TeamCheck", {
 	end,
 })
 
+ESP:NewBar({
+	Name = "Health",
+	Side = "Left",
+	Width = 2,
+	LerpColor = true,
+	GetValue = function(char, player)
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		return hum and hum.Health or 0, hum and hum.MaxHealth or 100
+	end,
+})
+
 -------------------------------- UI Settings Tab & Watermark --------------------------------
 Library:SetWatermarkVisibility(true)
 
