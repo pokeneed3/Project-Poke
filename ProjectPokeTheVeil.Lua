@@ -117,6 +117,7 @@ VisualGeneral:AddToggle("ESP_TeamCheck", {
 	end,
 })
 
+--[[
 ESP:NewBar({
 	Name = "Health",
 	Side = "Left",
@@ -127,6 +128,7 @@ ESP:NewBar({
 		return hum and hum.Health or 0, hum and hum.MaxHealth or 100
 	end,
 })
+]]
 
 -- ============ 1. Track players ============
 local function trackPlayer(player)

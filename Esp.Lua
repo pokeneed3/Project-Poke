@@ -20,8 +20,9 @@ local ESPConfig = {
 	TeamCheck = false,
 }
 
-local ESPObjects = {}
+local ESPObjects = {} -- [Instance] = drawings
 local CustomBars = {} -- Stores bar blueprints registered via ESP:NewBar
+local MobConns = {} -- Connections for the mob folder
 
 -- Helper: Destroy a drawing safely
 local function safeDestroy(drawing)
@@ -34,7 +35,7 @@ local function safeDestroy(drawing)
 	end
 end
 
--- Helper: Instantiates a single bar's drawing primitives for a player
+-- Helper: Instantiates a single bar's drawing primitives for one target
 local function createBarForPlayer(playerDrawings, barDef)
 	local outline = Drawing.new("Square")
 	outline.Visible = false
@@ -58,15 +59,56 @@ local function createBarForPlayer(playerDrawings, barDef)
 	}
 end
 
-local function createESP(player)
-	if player == LocalPlayer then
+-- Adapter: turn any Instance into a uniform "target" object
+local function makeTarget(instance)
+	if instance:IsA("Player") then
+		return {
+			Instance = instance,
+			GetModel = function()
+				return instance.Character
+			end,
+			GetName = function()
+				return ESPConfig.UseDisplayName and instance.DisplayName or ("@" .. instance.Name)
+			end,
+			GetTeam = function()
+				return instance.Team
+			end,
+		}
+	elseif instance:IsA("Model") then
+		return {
+			Instance = instance,
+			GetModel = function()
+				return instance
+			end,
+			GetName = function()
+				return instance.Name
+			end,
+			GetTeam = function()
+				return nil
+			end,
+		}
+	end
+	return nil
+end
+
+local function createESP(instance)
+	if instance == LocalPlayer then
+		return
+	end
+	if ESPObjects[instance] then
+		return
+	end -- already tracked
+
+	local target = makeTarget(instance)
+	if not target then
 		return
 	end
 
 	local drawings = {
 		Box = Drawing.new("Square"),
 		Name = Drawing.new("Text"),
-		Bars = {}, -- Holds all dynamic bars for this player
+		Bars = {}, -- Holds all dynamic bars for this target
+		Target = target, -- The adapter, used by the render loop
 	}
 
 	-- Configure Box
@@ -86,45 +128,50 @@ local function createESP(player)
 	drawings.Name.OutlineColor = Color3.fromRGB(0, 0, 0)
 	drawings.Name.ZIndex = 4
 
-	-- Build primitives for any bars registered before this player joined
+	-- Build primitives for any bars registered before this target existed
 	for _, barDef in ipairs(CustomBars) do
 		createBarForPlayer(drawings, barDef)
 	end
 
-	ESPObjects[player] = drawings
+	ESPObjects[instance] = drawings
 end
 
-local function removeESP(player)
-	if ESPObjects[player] then
-		safeDestroy(ESPObjects[player].Box)
-		safeDestroy(ESPObjects[player].Name)
-
-		for _, barDrawings in pairs(ESPObjects[player].Bars) do
-			safeDestroy(barDrawings.Outline)
-			safeDestroy(barDrawings.Fill)
-		end
-
-		ESPObjects[player] = nil
+local function removeESP(instance)
+	local drawings = ESPObjects[instance]
+	if not drawings then
+		return
 	end
+
+	safeDestroy(drawings.Box)
+	safeDestroy(drawings.Name)
+
+	for _, barDrawings in pairs(drawings.Bars) do
+		safeDestroy(barDrawings.Outline)
+		safeDestroy(barDrawings.Fill)
+	end
+
+	ESPObjects[instance] = nil
 end
 
--- Helper: Check if character is alive and valid
-local function isValidCharacter(player)
-	local char = player.Character
-	if not char then
+-- Helper: Check if character is alive and valid (works for players AND mobs)
+local function isValidCharacter(target)
+	local model = target.GetModel()
+	if not model then
 		return nil
 	end
 
-	local humanoid = char:FindFirstChildOfClass("Humanoid")
-	local root = char:FindFirstChild("HumanoidRootPart")
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	local root = model:FindFirstChild("HumanoidRootPart")
+		or model.PrimaryPart
+		or model:FindFirstChildWhichIsA("BasePart")
 
-	if humanoid and root and humanoid.Health > 0 then
-		return char, root, humanoid
+	if root and (not humanoid or humanoid.Health > 0) then
+		return model, root, humanoid
 	end
 	return nil
 end
 
--- Helper: Hide all primitives for a player
+-- Helper: Hide all primitives for a target
 local function hideESP(drawings)
 	drawings.Box.Visible = false
 	drawings.Name.Visible = false
@@ -144,9 +191,11 @@ renderConnection = RunService.RenderStepped:Connect(function()
 		return
 	end
 
-	for player, drawings in pairs(ESPObjects) do
-		local char, root, humanoid = isValidCharacter(player)
-		local isTeammate = ESPConfig.TeamCheck and (LocalPlayer.Team ~= nil and player.Team == LocalPlayer.Team)
+	for instance, drawings in pairs(ESPObjects) do
+		local target = drawings.Target
+		local char, root, humanoid = isValidCharacter(target)
+
+		local isTeammate = ESPConfig.TeamCheck and LocalPlayer.Team ~= nil and target.GetTeam() == LocalPlayer.Team
 
 		if char and not isTeammate then
 			local rootPos, onScreen = Camera:WorldToViewportPoint(root.Position)
@@ -177,7 +226,8 @@ renderConnection = RunService.RenderStepped:Connect(function()
 					for _, barDef in ipairs(CustomBars) do
 						local barDrawings = drawings.Bars[barDef.Name]
 						if barDrawings then
-							local curVal, maxVal = barDef.GetValue(char, player)
+							-- Pass raw instance so bar authors can branch on Player vs Model
+							local curVal, maxVal = barDef.GetValue(char, instance)
 							maxVal = (maxVal and maxVal > 0) and maxVal or 100
 							local ratio = math.clamp((curVal or 0) / maxVal, 0, 1)
 
@@ -187,11 +237,9 @@ renderConnection = RunService.RenderStepped:Connect(function()
 								local barX = boxX + width + rightOffset
 								rightOffset = rightOffset + barWidth + barSpacing + 2
 
-								-- Outline
 								barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
 								barDrawings.Outline.Size = Vector2.new(barWidth + 2, height + 2)
 
-								-- Vertical Fill
 								local barHeight = math.floor(height * ratio)
 								barDrawings.Fill.Position = Vector2.new(barX, boxY + (height - barHeight))
 								barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
@@ -199,11 +247,9 @@ renderConnection = RunService.RenderStepped:Connect(function()
 								local barY = boxY + height + bottomOffset
 								bottomOffset = bottomOffset + barWidth + barSpacing + 2
 
-								-- Outline
 								barDrawings.Outline.Position = Vector2.new(boxX - 1, barY - 1)
 								barDrawings.Outline.Size = Vector2.new(width + 2, barWidth + 2)
 
-								-- Horizontal Fill
 								local fillWidth = math.floor(width * ratio)
 								barDrawings.Fill.Position = Vector2.new(boxX, barY)
 								barDrawings.Fill.Size = Vector2.new(fillWidth, barWidth)
@@ -212,11 +258,9 @@ renderConnection = RunService.RenderStepped:Connect(function()
 								local barX = boxX - leftOffset
 								leftOffset = leftOffset + barSpacing + 2
 
-								-- Outline
 								barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
 								barDrawings.Outline.Size = Vector2.new(barWidth + 2, height + 2)
 
-								-- Vertical Fill
 								local barHeight = math.floor(height * ratio)
 								barDrawings.Fill.Position = Vector2.new(barX, boxY + (height - barHeight))
 								barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
@@ -238,8 +282,7 @@ renderConnection = RunService.RenderStepped:Connect(function()
 					local textParts = {}
 
 					if ESPConfig.ShowName then
-						local nameStr = ESPConfig.UseDisplayName and player.DisplayName or ("@" .. player.Name)
-						table.insert(textParts, nameStr)
+						table.insert(textParts, target.GetName())
 					end
 
 					if ESPConfig.ShowDistance then
@@ -270,14 +313,6 @@ renderConnection = RunService.RenderStepped:Connect(function()
 	end
 end)
 
--- Setup listeners & store connections for cleanup
-local playerAddedConn = Players.PlayerAdded:Connect(createESP)
-local playerRemovingConn = Players.PlayerRemoving:Connect(removeESP)
-
-for _, player in ipairs(Players:GetPlayers()) do
-	createESP(player)
-end
-
 -- Define the unload function
 local function unload()
 	if renderConnection then
@@ -285,17 +320,8 @@ local function unload()
 		renderConnection = nil
 	end
 
-	if playerAddedConn then
-		playerAddedConn:Disconnect()
-		playerAddedConn = nil
-	end
-	if playerRemovingConn then
-		playerRemovingConn:Disconnect()
-		playerRemovingConn = nil
-	end
-
-	for player, _ in pairs(ESPObjects) do
-		removeESP(player)
+	for instance, _ in pairs(ESPObjects) do
+		removeESP(instance)
 	end
 end
 
@@ -303,7 +329,7 @@ end
 local function NewBar(_, args)
 	assert(type(args) == "table", "NewBar expects a table of arguments")
 	assert(args.Name, "Bar must have a unique 'Name'")
-	assert(type(args.GetValue) == "function", "Bar must provide a 'GetValue(char, player)' function")
+	assert(type(args.GetValue) == "function", "Bar must provide a 'GetValue(char, instance)' function")
 
 	local barDef = {
 		Name = args.Name,
@@ -316,7 +342,7 @@ local function NewBar(_, args)
 
 	table.insert(CustomBars, barDef)
 
-	-- Immediately create drawing objects for players already in the server
+	-- Immediately create drawing objects for targets already tracked
 	for _, drawings in pairs(ESPObjects) do
 		if not drawings.Bars[barDef.Name] then
 			createBarForPlayer(drawings, barDef)
@@ -344,9 +370,12 @@ local function NewBar(_, args)
 end
 
 -- Return the module table
+-- Public API
 return {
 	Config = ESPConfig,
 	Objects = ESPObjects,
 	NewBar = NewBar,
+	Track = createESP,
+	Untrack = removeESP,
 	Unload = unload,
 }
