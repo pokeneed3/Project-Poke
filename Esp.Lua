@@ -424,73 +424,80 @@ local function isValidCharacter(target)
 	return nil
 end
 
--- Get world-space corners of the model's bounding box.
+-- Get world-space bounding box of ONLY the character's body parts.
+-- Ignores tools, accessories, hats, particles, etc.
 -- Returns: cf, size (CFrame, Vector3) or nil if it can't be computed.
 local function getWorldBoundingBox(model)
-	local ok, cf, size = pcall(function()
-		return model:GetBoundingBox()
-	end)
+	-- Collect body parts that actually belong to the character rig.
+	local parts = {}
 
-	if ok and cf and size then
-		return cf, size
-	end
+	-- Preferred: use the Humanoid's descendants (body parts live under the rig,
+	-- not under accessories/tools). If there's no Humanoid, fall back to the
+	-- whole model but still skip known non-body containers.
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	local searchRoot = humanoid or model
 
-	-- Fallback: use PrimaryPart / extents
-	local primary = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
-	if not primary then
-		return nil
-	end
-	local ok2, size2 = pcall(function()
-		return model:GetExtentsSize()
-	end)
-	if not ok2 then
-		return nil
-	end
-	return primary.CFrame, size2
-end
-
--- Project the 8 corners of an oriented box into screen space.
--- Returns: minX, minY, maxX, maxY
-local function projectBox(cf, size)
-	local half = size * 0.5
-	local corners = {
-		cf * Vector3.new(-half.X, -half.Y, -half.Z),
-		cf * Vector3.new(half.X, -half.Y, -half.Z),
-		cf * Vector3.new(-half.X, half.Y, -half.Z),
-		cf * Vector3.new(half.X, half.Y, -half.Z),
-		cf * Vector3.new(-half.X, -half.Y, half.Z),
-		cf * Vector3.new(half.X, -half.Y, half.Z),
-		cf * Vector3.new(-half.X, half.Y, half.Z),
-		cf * Vector3.new(half.X, half.Y, half.Z),
-	}
-
-	local minX, minY = math.huge, math.huge
-	local maxX, maxY = -math.huge, -math.huge
-	local anyFront = false
-
-	for _, worldPos in ipairs(corners) do
-		local sp, onScreen = Camera:WorldToViewportPoint(worldPos)
-		if sp.Z > 0 then
-			anyFront = true
-			if sp.X < minX then
-				minX = sp.X
+	for _, descendant in ipairs(searchRoot:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			-- Skip anything parented under a tool or accessory
+			local parent = descendant.Parent
+			local skip = false
+			while parent and parent ~= model do
+				if parent:IsA("Tool") or parent:IsA("Accessory") or parent:IsA("Accoutrement") then
+					skip = true
+					break
+				end
+				parent = parent.Parent
 			end
-			if sp.Y < minY then
-				minY = sp.Y
-			end
-			if sp.X > maxX then
-				maxX = sp.X
-			end
-			if sp.Y > maxY then
-				maxY = sp.Y
+			if not skip then
+				table.insert(parts, descendant)
 			end
 		end
 	end
 
-	if not anyFront then
-		return nil
+	-- Fallback: if the Humanoid search yielded nothing, use PrimaryPart
+	if #parts == 0 then
+		local primary = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+		if not primary then
+			return nil
+		end
+		local ok, size = pcall(function()
+			return model:GetExtentsSize()
+		end)
+		if not ok then
+			return nil
+		end
+		return primary.CFrame, size
 	end
-	return minX, minY, maxX, maxY
+
+	-- Compute min/max world-space corners from the actual body parts.
+	local minV = Vector3.new(math.huge, math.huge, math.huge)
+	local maxV = Vector3.new(-math.huge, -math.huge, -math.huge)
+
+	for _, part in ipairs(parts) do
+		local cf = part.CFrame
+		local half = part.Size * 0.5
+		-- 8 corners of the part's oriented box
+		local corners = {
+			cf * Vector3.new(-half.X, -half.Y, -half.Z),
+			cf * Vector3.new(half.X, -half.Y, -half.Z),
+			cf * Vector3.new(-half.X, half.Y, -half.Z),
+			cf * Vector3.new(half.X, half.Y, -half.Z),
+			cf * Vector3.new(-half.X, -half.Y, half.Z),
+			cf * Vector3.new(half.X, -half.Y, half.Z),
+			cf * Vector3.new(-half.X, half.Y, half.Z),
+			cf * Vector3.new(half.X, half.Y, half.Z),
+		}
+		for _, c in ipairs(corners) do
+			minV = Vector3.new(math.min(minV.X, c.X), math.min(minV.Y, c.Y), math.min(minV.Z, c.Z))
+			maxV = Vector3.new(math.max(maxV.X, c.X), math.max(maxV.Y, c.Y), math.max(maxV.Z, c.Z))
+		end
+	end
+
+	-- Build an axis-aligned CFrame + size from the extents.
+	local center = (minV + maxV) * 0.5
+	local size = maxV - minV
+	return CFrame.new(center), size
 end
 
 -- ============================================================
