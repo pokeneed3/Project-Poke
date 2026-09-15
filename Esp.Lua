@@ -504,6 +504,44 @@ end
 -- Box drawing
 -- ============================================================
 
+-- Project the model's bounding box into a stable screen-space rectangle.
+-- The size does NOT change based on camera angle: we use the model's
+-- vertical extent (which is roughly constant regardless of facing) and
+-- derive the width from a fixed aspect ratio.
+--
+-- Returns: minX, minY, maxX, maxY, or nil if the model isn't visible.
+local function projectBox(cf, size)
+	local center = cf.Position
+
+	-- Project the center and the top/bottom of the model
+	local centerScreen = Camera:WorldToViewportPoint(center)
+	local topScreen = Camera:WorldToViewportPoint(center + Vector3.new(0, size.Y * 0.5, 0))
+	local bottomScreen = Camera:WorldToViewportPoint(center + Vector3.new(0, -size.Y * 0.5, 0))
+
+	-- If any of the key points are behind the camera, bail
+	if centerScreen.Z <= 0 or topScreen.Z <= 0 or bottomScreen.Z <= 0 then
+		return nil
+	end
+
+	-- Screen-space height comes directly from the projected top/bottom.
+	-- This is stable because it only depends on the model's height and the
+	-- camera distance, not on which way the character is facing.
+	local screenHeight = math.abs(bottomScreen.Y - topScreen.Y)
+
+	-- Width is a fixed ratio of the height so it never changes with angle.
+	-- 0.5 is a reasonable humanoid aspect ratio; tweak if you want.
+	local aspect = 0.5
+	local screenWidth = screenHeight * aspect
+
+	-- Build the box around the projected center
+	local minX = centerScreen.X - screenWidth * 0.5
+	local maxX = centerScreen.X + screenWidth * 0.5
+	local minY = centerScreen.Y - screenHeight * 0.5
+	local maxY = centerScreen.Y + screenHeight * 0.5
+
+	return minX, minY, maxX, maxY
+end
+
 local function drawBox(drawings, group, x, y, w, h)
 	local box = drawings.Box
 	local color = getSetting(group, "BoxColor")
