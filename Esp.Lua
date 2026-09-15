@@ -22,6 +22,7 @@ local ESPConfig = {
 
 	-- ABSOLUTE fixed pixel size. The box will ALWAYS be exactly this
 	-- size on screen, at any distance, for any character.
+	-- This is cached on first frame per-target and never re-read.
 	FixedBoxSize = Vector2.new(60, 100),
 
 	CornerLength = 0.25, -- fraction of box side, for "Corners"
@@ -34,7 +35,7 @@ local ESPConfig = {
 	ShowBars = true,
 	BarColor = nil, -- nil = use per-bar Color / LerpColor
 	OcclusionCheck = false, -- raycast from camera to root
-	Padding = 0, -- extra pixels around box
+	Padding = 0, -- extra pixels around box (baked in at lock time)
 
 	-- ABSOLUTE fixed bar thickness in pixels. Never changes.
 	FixedBarWidth = 4,
@@ -371,6 +372,10 @@ local function createESP(instance, groupOverride)
 		Name = Drawing.new("Text"),
 		Bars = {},
 		Target = target,
+		-- Locked dimensions, computed once on first update and never changed.
+		_LockedSize = nil,
+		_LockedBarWidth = nil,
+		_LockedBarLength = nil,
 	}
 
 	drawings.Name.Visible = false
@@ -406,7 +411,7 @@ local function removeESP(instance)
 end
 
 -- ============================================================
--- Validity + bounding box
+-- Validity
 -- ============================================================
 
 local function isValidCharacter(target)
@@ -427,24 +432,31 @@ local function isValidCharacter(target)
 end
 
 -- ============================================================
--- Box drawing
+-- Box projection (SIZE IS CACHED, NEVER CHANGES)
 -- ============================================================
 
 -- Projects the target's ROOT POSITION to screen space and returns a
--- FIXED-size box centered on it. The world-space extents are never
--- used, so the on-screen size is byte-for-byte identical at any
--- distance, for any character, always.
-local function projectBox(root, group)
+-- FIXED-size box centered on it. The size is read ONCE and cached on
+-- the drawings object, so it can NEVER change after creation —
+-- regardless of group flips, config edits, padding, or distance.
+local function projectBox(root, group, drawings)
 	local pos = root.Position
 	local sp = Camera:WorldToViewportPoint(pos)
 
+	-- Behind camera or degenerate projection: hide entirely
 	if sp.Z <= 0 then
 		return nil
 	end
 
-	local fixed = getSetting(group, "FixedBoxSize") or Vector2.new(60, 100)
-	local w = fixed.X
-	local h = fixed.Y
+	-- Lock the size on first use. Never re-read from config.
+	if not drawings._LockedSize then
+		local fixed = getSetting(group, "FixedBoxSize") or Vector2.new(60, 100)
+		local pad = getSetting(group, "Padding") or 0
+		drawings._LockedSize = Vector2.new(fixed.X + pad * 2, fixed.Y + pad * 2)
+	end
+
+	local w = drawings._LockedSize.X
+	local h = drawings._LockedSize.Y
 
 	local minX = sp.X - w * 0.5
 	local maxX = sp.X + w * 0.5
@@ -593,17 +605,12 @@ local function updateTarget(instance, drawings)
 	end
 
 	-- Fixed-size box centered on the root's screen position.
-	local minX, minY, maxX, maxY = projectBox(root, group)
+	-- Padding is baked into _LockedSize at lock time.
+	local minX, minY, maxX, maxY = projectBox(root, group, drawings)
 	if not minX then
 		hideESP(drawings)
 		return
 	end
-
-	local pad = getSetting(group, "Padding") or 0
-	minX = minX - pad
-	minY = minY - pad
-	maxX = maxX + pad
-	maxY = maxY + pad
 
 	local boxX, boxY = minX, minY
 	local width = maxX - minX
@@ -615,10 +622,19 @@ local function updateTarget(instance, drawings)
 		hideBoxDrawings(drawings.Box)
 	end
 
-	-- Bars: thickness and length are BOTH absolute constants.
+	-- Bars: thickness and length are LOCKED once, then never change.
 	if getSetting(group, "ShowBars") then
-		local fixedBarWidth = getSetting(group, "FixedBarWidth") or 4
-		local fixedBarLength = getSetting(group, "FixedBarLength")
+		-- Lock bar width once.
+		if not drawings._LockedBarWidth then
+			drawings._LockedBarWidth = getSetting(group, "FixedBarWidth") or 4
+		end
+		local fixedBarWidth = drawings._LockedBarWidth
+
+		-- Lock bar length once (nil means "use box dimension").
+		if drawings._LockedBarLength == nil then
+			drawings._LockedBarLength = getSetting(group, "FixedBarLength")
+		end
+		local fixedBarLength = drawings._LockedBarLength
 
 		local leftOffset = 4
 		local rightOffset = 4
@@ -632,17 +648,15 @@ local function updateTarget(instance, drawings)
 				maxVal = (maxVal and maxVal > 0) and maxVal or 100
 				local ratio = math.clamp((curVal or 0) / maxVal, 0, 1)
 
-				-- Per-bar override, else global fixed width. Clamped by Min/Max.
-				local barWidth = math.clamp(barDef.Width or fixedBarWidth, barDef.MinWidth or 1, barDef.MaxWidth or 999)
+				-- Per-bar override, else global locked width.
+				local barWidth = barDef.Width or fixedBarWidth
 
-				-- Determine the bar's length axis.
-				-- Vertical bars (Left/Right): length is along the box height.
-				-- Horizontal bars (Bottom): length is along the box width.
+				-- Length axis: locked value, or the (locked) box dimension.
 				local lengthLimit
 				if barDef.Side == "Bottom" then
-					lengthLimit = fixedBarLength or width
+					lengthLimit = fixedBarLength or drawings._LockedSize.X
 				else
-					lengthLimit = fixedBarLength or height
+					lengthLimit = fixedBarLength or drawings._LockedSize.Y
 				end
 
 				if barDef.Side == "Right" then
