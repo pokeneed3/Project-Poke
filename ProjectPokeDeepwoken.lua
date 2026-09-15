@@ -854,6 +854,7 @@ MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", {
 	NoUI = true,
 	Text = "Menu keybind",
 })
+
 -- Library:Notify("hello")
 Library.ToggleKeybind = Options.MenuKeybind
 SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
@@ -861,7 +862,7 @@ ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
 SaveManager:IgnoreThemeSettings()
 ThemeManager:SetFolder("Project Poke")
-SaveManager:SetFolder("Project Poke/TheVeil")
+SaveManager:SetFolder("Project Poke/Deepwoken")
 SaveManager:BuildConfigSection(Tabs["UI Settings"])
 ThemeManager:ApplyToTab(Tabs["UI Settings"])
 SaveManager:LoadAutoloadConfig()

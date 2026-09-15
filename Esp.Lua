@@ -19,7 +19,7 @@ local ESPConfig = {
 	BoxStyle = "Square", -- "Square" | "Corners" | "Filled" | "3D"
 	BoxThickness = 1,
 	BoxTransparency = 1,
-	FixedBoxSize = Vector2.new(5, 20), -- width, height in pixels (constant at any distance)
+	FixedBoxSize = Vector2.new(5, 15), -- width, height in pixels (constant at any distance)
 	CornerLength = 0.25, -- fraction of box side, for "Corners"
 	MaxDistance = math.huge, -- studs; hide beyond this
 	TeamCheck = false,
@@ -970,6 +970,8 @@ local function unload()
 	table.clear(CustomBars)
 	table.clear(GroupClassifiers)
 end
+
+print("test")
 
 -- ============================================================
 -- Public API
