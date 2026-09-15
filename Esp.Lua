@@ -505,33 +505,42 @@ end
 -- ============================================================
 
 -- Project the model's bounding box into a stable screen-space rectangle.
--- The size does NOT change based on camera angle: we use the model's
--- vertical extent (which is roughly constant regardless of facing) and
--- derive the width from a fixed aspect ratio.
---
+-- Both width and height are derived from a single distance measurement,
+-- so the box scales uniformly with zoom and never squishes or distorts.
 -- Returns: minX, minY, maxX, maxY, or nil if the model isn't visible.
-local function projectBox(cf, size)
+local function projectBox(cf, size, group)
 	local center = cf.Position
 
-	-- Project the center and the top/bottom of the model
-	local centerScreen = Camera:WorldToViewportPoint(center)
-	local topScreen = Camera:WorldToViewportPoint(center + Vector3.new(0, size.Y * 0.5, 0))
-	local bottomScreen = Camera:WorldToViewportPoint(center + Vector3.new(0, -size.Y * 0.5, 0))
-
-	-- If any of the key points are behind the camera, bail
-	if centerScreen.Z <= 0 or topScreen.Z <= 0 or bottomScreen.Z <= 0 then
+	-- Project the center only
+	local centerScreen, onScreen = Camera:WorldToViewportPoint(center)
+	if centerScreen.Z <= 0 then
 		return nil
 	end
 
-	-- Screen-space height comes directly from the projected top/bottom.
-	-- This is stable because it only depends on the model's height and the
-	-- camera distance, not on which way the character is facing.
-	local screenHeight = math.abs(bottomScreen.Y - topScreen.Y)
+	-- Distance from camera to the model's center (in studs)
+	local distance = (Camera.CFrame.Position - center).Magnitude
+	if distance < 0.01 then
+		return nil
+	end
 
-	-- Width is a fixed ratio of the height so it never changes with angle.
-	-- 0.5 is a reasonable humanoid aspect ratio; tweak if you want.
-	local aspect = 0.5
-	local screenWidth = screenHeight * aspect
+	-- Viewport height and camera FOV determine the pixel-per-stud scale
+	-- at this distance. Using a single distance means width and height
+	-- scale together uniformly.
+	local viewport = Camera.ViewportSize
+	local fovRad = math.rad(Camera.FieldOfView)
+	-- Height of the view frustum at `distance` from the camera
+	local worldHeightAtDistance = 2 * distance * math.tan(fovRad * 0.5)
+	-- Pixels per stud at this depth
+	local pixelsPerStud = viewport.Y / worldHeightAtDistance
+
+	-- Screen-space size from the model's world-space dimensions
+	local screenHeight = size.Y * pixelsPerStud
+	local screenWidth = size.X * pixelsPerStud -- use actual model width, not aspect
+
+	-- Optional: enforce a minimum so tiny/distant boxes stay clickable
+	local minSize = 8
+	screenHeight = math.max(screenHeight, minSize)
+	screenWidth = math.max(screenWidth, minSize)
 
 	-- Build the box around the projected center
 	local minX = centerScreen.X - screenWidth * 0.5
@@ -696,7 +705,7 @@ local function updateTarget(instance, drawings)
 		return
 	end
 
-	local minX, minY, maxX, maxY = projectBox(cf, size)
+	local minX, minY, maxX, maxY = projectBox(cf, size, group)
 	if not minX then
 		hideESP(drawings)
 		return
