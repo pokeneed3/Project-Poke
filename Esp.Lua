@@ -12,6 +12,10 @@ local Camera = Workspace.CurrentCamera
 local ESPConfig = {
 	Enabled = true,
 
+	-- If true, the box wraps the character's 3D model perfectly
+	-- and scales naturally with distance. This is what you want.
+	Use3DBoundingBox = true,
+
 	-- Global fallbacks (groups override these)
 	BoxColor = Color3.fromRGB(255, 255, 255),
 	TextColor = Color3.fromRGB(255, 255, 255),
@@ -20,9 +24,7 @@ local ESPConfig = {
 	BoxThickness = 1,
 	BoxTransparency = 1,
 
-	-- ABSOLUTE fixed pixel size. The box will ALWAYS be exactly this
-	-- size on screen, at any distance, for any character.
-	-- This is snapshotted at creation time and can never change.
+	-- ABSOLUTE fixed pixel size. Only used if Use3DBoundingBox is false.
 	FixedBoxSize = Vector2.new(60, 100),
 
 	CornerLength = 0.25, -- fraction of box side, for "Corners"
@@ -35,7 +37,7 @@ local ESPConfig = {
 	ShowBars = true,
 	BarColor = nil, -- nil = use per-bar Color / LerpColor
 	OcclusionCheck = false, -- raycast from camera to root
-	Padding = 0, -- extra pixels around box (baked in at lock time)
+	Padding = 0, -- extra pixels around box (only used if Use3DBoundingBox is false)
 
 	-- ABSOLUTE fixed bar thickness in pixels. Never changes.
 	FixedBarWidth = 4,
@@ -367,23 +369,11 @@ local function createESP(instance, groupOverride)
 	end
 
 	local style = getSetting(target.Group, "BoxStyle")
-
-	-- Snapshot the fixed size and bar dimensions ONCE at creation.
-	-- These are never re-read, so nothing can resize them at runtime.
-	local fixed = getSetting(target.Group, "FixedBoxSize") or Vector2.new(60, 100)
-	local pad = getSetting(target.Group, "Padding") or 0
-
 	local drawings = {
 		Box = makeBoxDrawings(style),
 		Name = Drawing.new("Text"),
 		Bars = {},
 		Target = target,
-
-		-- LOCKED FOREVER at creation. Nothing in this script writes
-		-- to these after this point.
-		_LockedSize = Vector2.new(fixed.X + pad * 2, fixed.Y + pad * 2),
-		_LockedBarWidth = getSetting(target.Group, "FixedBarWidth") or 4,
-		_LockedBarLength = getSetting(target.Group, "FixedBarLength"), -- may be nil
 	}
 
 	drawings.Name.Visible = false
@@ -440,31 +430,69 @@ local function isValidCharacter(target)
 end
 
 -- ============================================================
--- Box projection (SIZE IS IMMUTABLE)
+-- Box projection
 -- ============================================================
 
--- Projects the target's ROOT POSITION to screen space and returns a
--- FIXED-size box centered on it. The size was snapshotted at creation
--- time and is never derived from distance, FOV, group, or config.
-local function projectBox(root, group, drawings)
-	local pos = root.Position
-	local sp = Camera:WorldToViewportPoint(pos)
+local function projectBox(model, group, drawings)
+	if getSetting(group, "Use3DBoundingBox") then
+		-- Project the 8 corners of the character's 3D bounding box.
+		-- This makes the box wrap the character perfectly and scale
+		-- naturally with distance (small when far, large when close).
+		local cf, size = model:GetBoundingBox()
+		local corners = {}
+		for x = -0.5, 0.5, 1 do
+			for y = -0.5, 0.5, 1 do
+				for z = -0.5, 0.5, 1 do
+					table.insert(corners, cf * Vector3.new(x * size.X, y * size.Y, z * size.Z))
+				end
+			end
+		end
 
-	-- Behind camera or degenerate projection: hide entirely
-	if sp.Z <= 0 then
-		return nil
+		local minX, minY = math.huge, math.huge
+		local maxX, maxY = -math.huge, -math.huge
+		local anyVisible = false
+
+		for _, corner in ipairs(corners) do
+			local sp = Camera:WorldToViewportPoint(corner)
+			if sp.Z > 0 then
+				anyVisible = true
+				minX = math.min(minX, sp.X)
+				minY = math.min(minY, sp.Y)
+				maxX = math.max(maxX, sp.X)
+				maxY = math.max(maxY, sp.Y)
+			end
+		end
+
+		if not anyVisible then
+			return nil
+		end
+		return minX, minY, maxX, maxY
+	else
+		-- Fixed pixel size fallback.
+		local root = model:FindFirstChild("HumanoidRootPart")
+			or model.PrimaryPart
+			or model:FindFirstChildWhichIsA("BasePart")
+		if not root then
+			return nil
+		end
+
+		local sp = Camera:WorldToViewportPoint(root.Position)
+		if sp.Z <= 0 then
+			return nil
+		end
+
+		local fixed = getSetting(group, "FixedBoxSize") or Vector2.new(60, 100)
+		local pad = getSetting(group, "Padding") or 0
+		local w = fixed.X + pad * 2
+		local h = fixed.Y + pad * 2
+
+		local minX = sp.X - w * 0.5
+		local maxX = sp.X + w * 0.5
+		local minY = sp.Y - h * 0.5
+		local maxY = sp.Y + h * 0.5
+
+		return minX, minY, maxX, maxY
 	end
-
-	-- Size is immutable — read the locked values, never recompute.
-	local w = drawings._LockedSize.X
-	local h = drawings._LockedSize.Y
-
-	local minX = sp.X - w * 0.5
-	local maxX = sp.X + w * 0.5
-	local minY = sp.Y - h * 0.5
-	local maxY = sp.Y + h * 0.5
-
-	return minX, minY, maxX, maxY
 end
 
 local function drawBox(drawings, group, x, y, w, h)
@@ -503,7 +531,7 @@ local function drawBox(drawings, group, x, y, w, h)
 		setLine(box.BotRightH, x + w, y + h, x + w - hLen, y + h)
 		setLine(box.BotRightV, x + w, y + h, x + w, y + h - vLen)
 	elseif wantedStyle == "3D" then
-		local off = 4
+		local off = math.min(w, h) * 0.1
 		local lines = box.Lines
 		local pts = {
 			Vector2.new(x, y),
@@ -605,9 +633,7 @@ local function updateTarget(instance, drawings)
 		end
 	end
 
-	-- Fixed-size box centered on the root's screen position.
-	-- Size is immutable; only X/Y change per frame.
-	local minX, minY, maxX, maxY = projectBox(root, group, drawings)
+	local minX, minY, maxX, maxY = projectBox(char, group, drawings)
 	if not minX then
 		hideESP(drawings)
 		return
@@ -623,10 +649,10 @@ local function updateTarget(instance, drawings)
 		hideBoxDrawings(drawings.Box)
 	end
 
-	-- Bars: thickness and length were LOCKED at creation and never change.
+	-- Bars
 	if getSetting(group, "ShowBars") then
-		local fixedBarWidth = drawings._LockedBarWidth
-		local fixedBarLength = drawings._LockedBarLength
+		local fixedBarWidth = getSetting(group, "FixedBarWidth") or 4
+		local fixedBarLength = getSetting(group, "FixedBarLength")
 
 		local leftOffset = 4
 		local rightOffset = 4
@@ -640,15 +666,13 @@ local function updateTarget(instance, drawings)
 				maxVal = (maxVal and maxVal > 0) and maxVal or 100
 				local ratio = math.clamp((curVal or 0) / maxVal, 0, 1)
 
-				-- Per-bar override, else global locked width.
 				local barWidth = barDef.Width or fixedBarWidth
 
-				-- Length axis: locked value, or the (locked) box dimension.
 				local lengthLimit
 				if barDef.Side == "Bottom" then
-					lengthLimit = fixedBarLength or drawings._LockedSize.X
+					lengthLimit = fixedBarLength or width
 				else
-					lengthLimit = fixedBarLength or drawings._LockedSize.Y
+					lengthLimit = fixedBarLength or height
 				end
 
 				if barDef.Side == "Right" then
