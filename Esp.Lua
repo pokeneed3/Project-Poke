@@ -312,7 +312,7 @@ local function makeBoxDrawings(style)
 	end
 	return d
 end
-
+print("Test")
 local function destroyBoxDrawings(box)
 	if not box then
 		return
