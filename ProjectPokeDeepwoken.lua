@@ -1,9 +1,12 @@
 -- Services
+local Lighting = cloneref(game:GetService("Lighting"))
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = cloneref(game:GetService("ReplicatedStorage"))
 local Stats = game:GetService("Stats")
 local UserInputService = cloneref(game:GetService("UserInputService"))
+
+local Camera = workspace.CurrentCamera
 
 -- Variables
 local Connections = {}
@@ -658,6 +661,49 @@ VisualMods:AddToggle("Remove_Fog", {
 
 			game.Lighting.Atmosphere.Density = Original_Density
 		end
+	end,
+})
+
+VisualMods:AddToggle("Remove_Shadows", {
+	Text = "No Shadows",
+	Default = false,
+
+	Callback = function(Value)
+		if Value then
+			Lighting.GlobalShadows = false
+		else
+			Lighting.GlobalShadows = true
+		end
+	end,
+})
+
+local MaxZoomDefault = player.CameraMaxZoomDistance
+local CurrentMaxZoom = MaxZoomDefault
+
+VisualMods:AddToggle("MaxZoom_Toggle", {
+	Text = "Max Zoom",
+	Default = false,
+
+	Callback = function(Value)
+		if Value then
+			player.CameraMaxZoomDistance = CurrentMaxZoom
+		else
+			player.CameraMaxZoomDistance = MaxZoomDefault
+		end
+	end,
+})
+
+VisualMods:AddSlider("MaxZoom_Slider", {
+	Text = "Max Zoom",
+	Default = MaxZoomDefault,
+	Min = 10,
+	Max = 1000,
+	Rounding = 0,
+	Compact = false,
+
+	Callback = function(Value)
+		CurrentMaxZoom = Value
+		player.CameraMaxZoomDistance = CurrentMaxZoom
 	end,
 })
 
