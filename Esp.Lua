@@ -6,44 +6,85 @@ local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 
+-- ============================================================
 -- Configuration
+-- ============================================================
 local ESPConfig = {
 	Enabled = true,
+
+	-- Global fallbacks (groups override these)
 	BoxColor = Color3.fromRGB(255, 255, 255),
 	TextColor = Color3.fromRGB(255, 255, 255),
 	TextSize = 14,
-
+	BoxStyle = "Square", -- "Square" | "Corners" | "Filled" | "3D"
+	BoxThickness = 1,
+	BoxTransparency = 1,
+	CornerLength = 0.25, -- fraction of box side, for "Corners"
+	MaxDistance = math.huge, -- studs; hide beyond this
+	TeamCheck = false,
 	ShowBox = true,
 	ShowName = true,
-	UseDisplayName = true,
 	ShowDistance = true,
+	UseDisplayName = true,
 	ShowBars = true,
-	ShowHealth = true,
-	TeamCheck = false,
-	BarColor = Color3.fromRGB(0, 255, 0),
+	BarColor = nil, -- nil = use per-bar Color / LerpColor
+	OcclusionCheck = false, -- raycast from camera to root
+	Padding = 0, -- extra pixels around box
 
+	-- Optional global text formatter.
+	-- Signature: function(target, char, distance, group) -> string
+	FormatText = nil,
+
+	-- Fallback group config applied when a group has no explicit key.
+	Defaults = {},
+
+	-- Per-group overrides, e.g.
+	-- Groups = {
+	--   Player = { BoxColor = Color3.fromRGB(255,0,0) },
+	--   NPC    = { BoxColor = Color3.fromRGB(0,255,0), MaxDistance = 500 },
+	-- }
 	Groups = {},
 }
 
 local ESPObjects = {}
 local CustomBars = {}
 local GroupClassifiers = {}
+local Connections = {}
 
+-- ============================================================
+-- Helpers
+-- ============================================================
+
+-- Resolve a setting for a group with fallback chain:
+--   Groups[group][key] -> Groups.Default[key] -> Defaults[key] -> ESPConfig[key]
 local function getSetting(group, key)
 	local groupCfg = ESPConfig.Groups[group]
 	if groupCfg and groupCfg[key] ~= nil then
 		return groupCfg[key]
 	end
+
+	local defaultGroup = ESPConfig.Groups.Default
+	if defaultGroup and defaultGroup[key] ~= nil then
+		return defaultGroup[key]
+	end
+
+	if ESPConfig.Defaults[key] ~= nil then
+		return ESPConfig.Defaults[key]
+	end
+
 	return ESPConfig[key]
 end
 
 local function safeDestroy(drawing)
-	if drawing then
+	if not drawing then
+		return
+	end
+	pcall(function()
 		drawing.Visible = false
-		local destroyFn = drawing.Destroy or drawing.Remove
-		if destroyFn then
-			destroyFn(drawing)
-		end
+	end)
+	local destroyFn = drawing.Destroy or drawing.Remove
+	if destroyFn then
+		pcall(destroyFn, drawing)
 	end
 end
 
@@ -63,14 +104,11 @@ local function resolveGroup(instance)
 	return "Anything"
 end
 
-local function RegisterGroup(selfOrName, nameOrPredicate, predicateOrAtFront, atFront)
-	local name, predicate
-	if type(selfOrName) == "table" then
-		name, predicate = nameOrPredicate, predicateOrAtFront
-	else
-		name, predicate, atFront = selfOrName, nameOrPredicate, predicateOrAtFront
-	end
+-- ============================================================
+-- Group registration
+-- ============================================================
 
+local function RegisterGroup(name, predicate, atFront)
 	assert(type(name) == "string", "Group name must be a string")
 	assert(type(predicate) == "function", "predicate must be function(instance) -> boolean")
 
@@ -81,6 +119,10 @@ local function RegisterGroup(selfOrName, nameOrPredicate, predicateOrAtFront, at
 				break
 			else
 				c.Predicate = predicate
+				-- Refresh existing targets so the new predicate takes effect
+				for instance in pairs(ESPObjects) do
+					ESPObjects[instance].Target.NeedsRefresh = true
+				end
 				return
 			end
 		end
@@ -91,21 +133,29 @@ local function RegisterGroup(selfOrName, nameOrPredicate, predicateOrAtFront, at
 	else
 		table.insert(GroupClassifiers, { Name = name, Predicate = predicate })
 	end
+
+	-- Refresh existing targets
+	for instance in pairs(ESPObjects) do
+		ESPObjects[instance].Target.NeedsRefresh = true
+	end
 end
 
-local function UnregisterGroup(selfOrName, name)
-	if type(selfOrName) ~= "table" then
-		name = selfOrName
-	end
-
+local function UnregisterGroup(name)
 	for i, c in ipairs(GroupClassifiers) do
 		if c.Name == name then
 			table.remove(GroupClassifiers, i)
+			for instance in pairs(ESPObjects) do
+				ESPObjects[instance].Target.NeedsRefresh = true
+			end
 			return true
 		end
 	end
 	return false
 end
+
+-- ============================================================
+-- Bars
+-- ============================================================
 
 local function createBarForPlayer(playerDrawings, barDef, group)
 	if barDef.Groups and not table.find(barDef.Groups, group) then
@@ -131,11 +181,11 @@ local function createBarForPlayer(playerDrawings, barDef, group)
 	playerDrawings.Bars[barDef.Name] = {
 		Outline = outline,
 		Fill = fill,
+		Def = barDef,
 	}
 end
 
-local RefreshGroup
-RefreshGroup = function(_, instance)
+local RefreshGroup = function(instance)
 	local drawings = ESPObjects[instance]
 	if not drawings then
 		return
@@ -161,39 +211,140 @@ RefreshGroup = function(_, instance)
 	end
 end
 
+-- ============================================================
+-- Target construction
+-- ============================================================
+
 local function makeTarget(instance, groupOverride)
-	if instance then
-		if instance:IsA("Player") then
-			return {
-				Instance = instance,
-				Group = groupOverride or resolveGroup(instance),
-				GetModel = function()
-					return instance.Character
-				end,
-				GetName = function()
-					return ESPConfig.UseDisplayName and instance.DisplayName or ("@" .. instance.Name)
-				end,
-				GetTeam = function()
-					return instance.Team
-				end,
-			}
-		elseif instance:IsA("Model") then
-			return {
-				Instance = instance,
-				Group = groupOverride or resolveGroup(instance),
-				GetModel = function()
-					return instance
-				end,
-				GetName = function()
-					return instance.Name
-				end,
-				GetTeam = function()
-					return nil
-				end,
-			}
-		end
+	if not instance then
+		return nil
+	end
+
+	if instance:IsA("Player") then
+		return {
+			Instance = instance,
+			Group = groupOverride or resolveGroup(instance),
+			GetModel = function()
+				return instance.Character
+			end,
+			GetName = function()
+				return ESPConfig.UseDisplayName and instance.DisplayName or instance.Name
+			end,
+			GetTeam = function()
+				return instance.Team
+			end,
+			IsLocal = (instance == LocalPlayer),
+		}
+	elseif instance:IsA("Model") then
+		return {
+			Instance = instance,
+			Group = groupOverride or resolveGroup(instance),
+			GetModel = function()
+				return instance
+			end,
+			GetName = function()
+				-- Optional: allow attribute override on the model
+				local override = instance:GetAttribute("ESPName")
+				if override then
+					return tostring(override)
+				end
+				return instance.Name
+			end,
+			GetTeam = function()
+				return nil
+			end,
+			IsLocal = false,
+		}
 	end
 	return nil
+end
+
+-- ============================================================
+-- Drawing creation
+-- ============================================================
+
+local function makeBoxDrawings(style)
+	local d = { Style = style }
+	if style == "Corners" then
+		d.TopLeftH = Drawing.new("Line")
+		d.TopLeftV = Drawing.new("Line")
+		d.TopRightH = Drawing.new("Line")
+		d.TopRightV = Drawing.new("Line")
+		d.BotLeftH = Drawing.new("Line")
+		d.BotLeftV = Drawing.new("Line")
+		d.BotRightH = Drawing.new("Line")
+		d.BotRightV = Drawing.new("Line")
+		d.All = {
+			d.TopLeftH,
+			d.TopLeftV,
+			d.TopRightH,
+			d.TopRightV,
+			d.BotLeftH,
+			d.BotLeftV,
+			d.BotRightH,
+			d.BotRightV,
+		}
+		for _, line in ipairs(d.All) do
+			line.Visible = false
+			line.Thickness = 1
+			line.Transparency = 1
+			line.ZIndex = 2
+		end
+	elseif style == "3D" then
+		-- 12 lines of a wireframe box
+		d.Lines = {}
+		for i = 1, 12 do
+			local line = Drawing.new("Line")
+			line.Visible = false
+			line.Thickness = 1
+			line.Transparency = 1
+			line.ZIndex = 2
+			d.Lines[i] = line
+		end
+	else
+		-- Square or Filled both use a single Square
+		d.Square = Drawing.new("Square")
+		d.Square.Visible = false
+		d.Square.Thickness = 1
+		d.Square.Filled = (style == "Filled")
+		d.Square.Transparency = (style == "Filled") and 0.5 or 1
+		d.Square.ZIndex = 2
+	end
+	return d
+end
+
+local function destroyBoxDrawings(box)
+	if not box then
+		return
+	end
+	if box.All then
+		for _, line in ipairs(box.All) do
+			safeDestroy(line)
+		end
+	elseif box.Lines then
+		for _, line in ipairs(box.Lines) do
+			safeDestroy(line)
+		end
+	elseif box.Square then
+		safeDestroy(box.Square)
+	end
+end
+
+local function hideBoxDrawings(box)
+	if not box then
+		return
+	end
+	if box.All then
+		for _, line in ipairs(box.All) do
+			line.Visible = false
+		end
+	elseif box.Lines then
+		for _, line in ipairs(box.Lines) do
+			line.Visible = false
+		end
+	elseif box.Square then
+		box.Square.Visible = false
+	end
 end
 
 local function createESP(instance, groupOverride)
@@ -208,24 +359,21 @@ local function createESP(instance, groupOverride)
 	if not target then
 		return
 	end
+	if target.IsLocal then
+		return
+	end
 
+	local style = getSetting(target.Group, "BoxStyle")
 	local drawings = {
-		Box = Drawing.new("Square"),
+		Box = makeBoxDrawings(style),
 		Name = Drawing.new("Text"),
 		Bars = {},
 		Target = target,
 	}
 
-	drawings.Box.Visible = false
-	drawings.Box.Color = getSetting(target.Group, "BoxColor")
-	drawings.Box.Thickness = 1
-	drawings.Box.Filled = false
-	drawings.Box.Transparency = 1
-	drawings.Box.ZIndex = 2
-
 	drawings.Name.Visible = false
 	drawings.Name.Color = getSetting(target.Group, "TextColor")
-	drawings.Name.Size = ESPConfig.TextSize
+	drawings.Name.Size = getSetting(target.Group, "TextSize")
 	drawings.Name.Center = true
 	drawings.Name.Outline = true
 	drawings.Name.OutlineColor = Color3.fromRGB(0, 0, 0)
@@ -244,7 +392,7 @@ local function removeESP(instance)
 		return
 	end
 
-	safeDestroy(drawings.Box)
+	destroyBoxDrawings(drawings.Box)
 	safeDestroy(drawings.Name)
 
 	for _, barDrawings in pairs(drawings.Bars) do
@@ -254,6 +402,10 @@ local function removeESP(instance)
 
 	ESPObjects[instance] = nil
 end
+
+-- ============================================================
+-- Validity + bounding box
+-- ============================================================
 
 local function isValidCharacter(target)
 	local model = target.GetModel()
@@ -272,8 +424,173 @@ local function isValidCharacter(target)
 	return nil
 end
 
+-- Get world-space corners of the model's bounding box.
+-- Returns: min, max, size (Vector3s) or nil if it can't be computed.
+local function getWorldBoundingBox(model)
+	local ok, cf, size = pcall(function()
+		return model:GetBoundingBox()
+	end)
+
+	if ok and cf and size then
+		return cf, size
+	end
+
+	-- Fallback: use PrimaryPart / extents
+	local primary = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+	if not primary then
+		return nil
+	end
+	local ok2, size2 = pcall(function()
+		return model:GetExtentsSize()
+	end)
+	if not ok2 then
+		return nil
+	end
+	return primary.CFrame, size2
+end
+
+-- Project the 8 corners of an oriented box into screen space.
+-- Returns: minX, minY, maxX, maxY, allOnScreen
+local function projectBox(cf, size)
+	local half = size * 0.5
+	local corners = {
+		cf * Vector3.new(-half.X, -half.Y, -half.Z),
+		cf * Vector3.new(half.X, -half.Y, -half.Z),
+		cf * Vector3.new(-half.X, half.Y, -half.Z),
+		cf * Vector3.new(half.X, half.Y, -half.Z),
+		cf * Vector3.new(-half.X, -half.Y, half.Z),
+		cf * Vector3.new(half.X, -half.Y, half.Z),
+		cf * Vector3.new(-half.X, half.Y, half.Z),
+		cf * Vector3.new(half.X, half.Y, half.Z),
+	}
+
+	local minX, minY = math.huge, math.huge
+	local maxX, maxY = -math.huge, -math.huge
+	local anyFront = false
+
+	for _, worldPos in ipairs(corners) do
+		local sp, onScreen = Camera:WorldToViewportPoint(worldPos)
+		if sp.Z > 0 then
+			anyFront = true
+			if sp.X < minX then
+				minX = sp.X
+			end
+			if sp.Y < minY then
+				minY = sp.Y
+			end
+			if sp.X > maxX then
+				maxX = sp.X
+			end
+			if sp.Y > maxY then
+				maxY = sp.Y
+			end
+		end
+	end
+
+	if not anyFront then
+		return nil
+	end
+	return minX, minY, maxX, maxY
+end
+
+-- ============================================================
+-- Box drawing
+-- ============================================================
+
+local function drawBox(drawings, group, x, y, w, h)
+	local box = drawings.Box
+	local color = getSetting(group, "BoxColor")
+	local thickness = getSetting(group, "BoxThickness")
+	local transparency = getSetting(group, "BoxTransparency")
+	local wantedStyle = getSetting(group, "BoxStyle")
+
+	-- Rebuild drawings if the style changed at runtime
+	if box.Style ~= wantedStyle then
+		destroyBoxDrawings(box)
+		drawings.Box = makeBoxDrawings(wantedStyle)
+		box = drawings.Box
+	end
+
+	if wantedStyle == "Corners" then
+		local cl = getSetting(group, "CornerLength")
+		local hLen = w * cl
+		local vLen = h * cl
+
+		local function setLine(line, x1, y1, x2, y2)
+			line.From = Vector2.new(x1, y1)
+			line.To = Vector2.new(x2, y2)
+			line.Color = color
+			line.Thickness = thickness
+			line.Transparency = transparency
+			line.Visible = true
+		end
+
+		setLine(box.TopLeftH, x, y, x + hLen, y)
+		setLine(box.TopLeftV, x, y, x, y + vLen)
+		setLine(box.TopRightH, x + w, y, x + w - hLen, y)
+		setLine(box.TopRightV, x + w, y, x + w, y + vLen)
+		setLine(box.BotLeftH, x, y + h, x + hLen, y + h)
+		setLine(box.BotLeftV, x, y + h, x, y + h - vLen)
+		setLine(box.BotRightH, x + w, y + h, x + w - hLen, y + h)
+		setLine(box.BotRightV, x + w, y + h, x + w, y + h - vLen)
+	elseif wantedStyle == "3D" then
+		-- Simple 2D approximation: draw the 2D square plus a small offset
+		-- for a pseudo-3D look. True 3D would need corner projection; keep
+		-- it lightweight but distinct from Square.
+		local off = 4
+		local lines = box.Lines
+		local pts = {
+			Vector2.new(x, y),
+			Vector2.new(x + w, y),
+			Vector2.new(x + w, y + h),
+			Vector2.new(x, y + h),
+		}
+		local back = {}
+		for i, p in ipairs(pts) do
+			back[i] = Vector2.new(p.X + off, p.Y - off)
+		end
+		local edges = {
+			{ pts[1], pts[2] },
+			{ pts[2], pts[3] },
+			{ pts[3], pts[4] },
+			{ pts[4], pts[1] },
+			{ back[1], back[2] },
+			{ back[2], back[3] },
+			{ back[3], back[4] },
+			{ back[4], back[1] },
+			{ pts[1], back[1] },
+			{ pts[2], back[2] },
+			{ pts[3], back[3] },
+			{ pts[4], back[4] },
+		}
+		for i = 1, 12 do
+			local line = lines[i]
+			local e = edges[i]
+			line.From = e[1]
+			line.To = e[2]
+			line.Color = color
+			line.Thickness = thickness
+			line.Transparency = transparency
+			line.Visible = true
+		end
+	else
+		-- Square or Filled
+		box.Square.Size = Vector2.new(w, h)
+		box.Square.Position = Vector2.new(x, y)
+		box.Square.Color = color
+		box.Square.Thickness = thickness
+		box.Square.Transparency = (wantedStyle == "Filled") and 0.5 or transparency
+		box.Square.Filled = (wantedStyle == "Filled")
+		box.Square.Visible = true
+	end
+end
+
+-- ============================================================
+-- Per-frame update
+-- ============================================================
+
 local function hideESP(drawings)
-	drawings.Box.Visible = false
+	hideBoxDrawings(drawings.Box)
 	drawings.Name.Visible = false
 	for _, barDrawings in pairs(drawings.Bars) do
 		barDrawings.Outline.Visible = false
@@ -281,52 +598,84 @@ local function hideESP(drawings)
 	end
 end
 
-Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
-	Camera = Workspace.CurrentCamera
-end)
-
 local function updateTarget(instance, drawings)
 	local target = drawings.Target
 	local group = target.Group
+
+	-- Group refresh if requested
+	if target.NeedsRefresh then
+		target.NeedsRefresh = false
+		RefreshGroup(instance)
+		group = drawings.Target.Group
+	end
+
 	local char, root = isValidCharacter(target)
-
-	local isTeammate = ESPConfig.TeamCheck and LocalPlayer.Team ~= nil and target.GetTeam() == LocalPlayer.Team
-
-	if not char or isTeammate then
+	if not char then
 		hideESP(drawings)
 		return
 	end
 
-	local rootPos, onScreen = Camera:WorldToViewportPoint(root.Position)
-	if not onScreen then
+	-- Distance check
+	local distance = (Camera.CFrame.Position - root.Position).Magnitude
+	local maxDist = getSetting(group, "MaxDistance")
+	if maxDist and distance > maxDist then
 		hideESP(drawings)
 		return
 	end
 
-	local headPos = Camera:WorldToViewportPoint(root.Position + Vector3.new(0, 2.5, 0))
-	local legPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3.5, 0))
-
-	if not (headPos.Z > 0 and legPos.Z > 0) then
+	-- Team check (per-group)
+	local isTeammate = getSetting(group, "TeamCheck")
+		and LocalPlayer.Team ~= nil
+		and target.GetTeam() == LocalPlayer.Team
+	if isTeammate then
 		hideESP(drawings)
 		return
 	end
 
-	local height = math.abs(headPos.Y - legPos.Y)
-	local width = height / 1.6
+	-- Occlusion check (optional)
+	if getSetting(group, "OcclusionCheck") then
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Exclude
+		params.FilterDescendantsInstances = { char, LocalPlayer.Character }
+		local result = Workspace:Raycast(Camera.CFrame.Position, root.Position - Camera.CFrame.Position, params)
+		if result then
+			hideESP(drawings)
+			return
+		end
+	end
 
-	local boxX = rootPos.X - (width / 2)
-	local boxY = math.min(headPos.Y, legPos.Y)
+	-- Bounding box projection
+	local cf, size = getWorldBoundingBox(char)
+	if not cf then
+		hideESP(drawings)
+		return
+	end
 
+	local minX, minY, maxX, maxY = projectBox(cf, size)
+	if not minX then
+		hideESP(drawings)
+		return
+	end
+
+	local pad = getSetting(group, "Padding") or 0
+	minX = minX - pad
+	minY = minY - pad
+	maxX = maxX + pad
+	maxY = maxY + pad
+
+	local boxX, boxY = minX, minY
+	local width = math.max(maxX - minX, 1)
+	local height = math.max(maxY - minY, 1)
+
+	-- Box
 	if getSetting(group, "ShowBox") then
-		drawings.Box.Size = Vector2.new(width, height)
-		drawings.Box.Position = Vector2.new(boxX, boxY)
-		drawings.Box.Color = getSetting(group, "BoxColor")
-		drawings.Box.Visible = true
+		drawBox(drawings, group, boxX, boxY, width, height)
 	else
-		drawings.Box.Visible = false
+		hideBoxDrawings(drawings.Box)
 	end
 
-	if getSetting(group, "ShowBars") and getSetting(group, "ShowHealth") ~= false then
+	-- Bars
+	if getSetting(group, "ShowBars") then
 		local leftOffset = 4
 		local rightOffset = 4
 		local bottomOffset = 4
@@ -338,7 +687,6 @@ local function updateTarget(instance, drawings)
 				local curVal, maxVal = barDef.GetValue(char, instance)
 				maxVal = (maxVal and maxVal > 0) and maxVal or 100
 				local ratio = math.clamp((curVal or 0) / maxVal, 0, 1)
-
 				local barWidth = barDef.Width or 2
 
 				if barDef.Side == "Right" then
@@ -361,7 +709,7 @@ local function updateTarget(instance, drawings)
 					local fillWidth = math.floor(width * ratio)
 					barDrawings.Fill.Position = Vector2.new(boxX, barY)
 					barDrawings.Fill.Size = Vector2.new(fillWidth, barWidth)
-				elseif barDef.Side == "Left" then
+				else -- "Left"
 					leftOffset = leftOffset + barWidth
 					local barX = boxX - leftOffset
 					leftOffset = leftOffset + barSpacing + 2
@@ -374,7 +722,8 @@ local function updateTarget(instance, drawings)
 					barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
 				end
 
-				local groupBarColor = getSetting(group, "BarColor")
+				-- Color: per-group BarColor > per-bar Color/Lerp > default
+				local groupBarColor = ESPConfig.Groups[group] and ESPConfig.Groups[group].BarColor
 				if groupBarColor then
 					barDrawings.Fill.Color = groupBarColor
 				elseif barDef.LerpColor then
@@ -394,25 +743,37 @@ local function updateTarget(instance, drawings)
 		end
 	end
 
-	if getSetting(group, "ShowName") or getSetting(group, "ShowDistance") then
-		local textParts = {}
+	-- Text label
+	local showName = getSetting(group, "ShowName")
+	local showDist = getSetting(group, "ShowDistance")
 
-		if getSetting(group, "ShowName") then
-			table.insert(textParts, target.GetName())
+	if showName or showDist then
+		local finalText
+
+		if ESPConfig.FormatText then
+			local ok, result = pcall(ESPConfig.FormatText, target, char, distance, group)
+			if ok and result then
+				finalText = result
+			end
 		end
 
-		if getSetting(group, "ShowDistance") then
-			local distance = math.floor((Camera.CFrame.Position - root.Position).Magnitude)
-			table.insert(textParts, `[{distance}m]`)
+		if not finalText then
+			local parts = {}
+			if showName then
+				table.insert(parts, target.GetName())
+			end
+			if showDist then
+				table.insert(parts, "[" .. math.floor(distance) .. "m]")
+			end
+			finalText = table.concat(parts, " ")
 		end
-
-		local finalText = table.concat(textParts, " ")
 
 		if #finalText > 0 then
+			local textSize = getSetting(group, "TextSize")
 			drawings.Name.Text = finalText
 			drawings.Name.Color = getSetting(group, "TextColor")
-			drawings.Name.Size = ESPConfig.TextSize
-			drawings.Name.Position = Vector2.new(rootPos.X, boxY - drawings.Name.Size - 4)
+			drawings.Name.Size = textSize
+			drawings.Name.Position = Vector2.new((minX + maxX) / 2, boxY - textSize - 4)
 			drawings.Name.Visible = true
 		else
 			drawings.Name.Visible = false
@@ -422,8 +783,11 @@ local function updateTarget(instance, drawings)
 	end
 end
 
-local renderConnection
-renderConnection = RunService.RenderStepped:Connect(function()
+-- ============================================================
+-- Render loop
+-- ============================================================
+
+local renderConnection = RunService.RenderStepped:Connect(function()
 	if not ESPConfig.Enabled then
 		for _, drawings in pairs(ESPObjects) do
 			hideESP(drawings)
@@ -440,25 +804,22 @@ renderConnection = RunService.RenderStepped:Connect(function()
 	end
 end)
 
-local function unload()
-	if renderConnection then
-		renderConnection:Disconnect()
-		renderConnection = nil
-	end
+-- ============================================================
+-- Camera change connection (tracked for cleanup)
+-- ============================================================
 
-	for instance, _ in pairs(ESPObjects) do
-		removeESP(instance)
-	end
+table.insert(
+	Connections,
+	Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+		Camera = Workspace.CurrentCamera
+	end)
+)
 
-	table.clear(CustomBars)
-	table.clear(GroupClassifiers)
-end
+-- ============================================================
+-- Bar API
+-- ============================================================
 
-local function NewBar(selfOrArgs, args)
-	if args == nil then
-		args = selfOrArgs
-	end
-
+local function NewBar(args)
 	assert(type(args) == "table", "NewBar expects a table of arguments")
 	assert(args.Name, "Bar must have a unique 'Name'")
 	assert(type(args.GetValue) == "function", "Bar must provide a 'GetValue(char, instance)' function")
@@ -486,24 +847,78 @@ local function NewBar(selfOrArgs, args)
 		end
 	end
 
-	return {
-		Remove = function()
-			for i, def in ipairs(CustomBars) do
-				if def.Name == barDef.Name then
-					table.remove(CustomBars, i)
-					break
-				end
+	local handle = {}
+
+	function handle.Remove()
+		for i, def in ipairs(CustomBars) do
+			if def.Name == barDef.Name then
+				table.remove(CustomBars, i)
+				break
 			end
-			for _, drawings in pairs(ESPObjects) do
-				if drawings.Bars[barDef.Name] then
-					safeDestroy(drawings.Bars[barDef.Name].Outline)
-					safeDestroy(drawings.Bars[barDef.Name].Fill)
-					drawings.Bars[barDef.Name] = nil
-				end
+		end
+		for _, drawings in pairs(ESPObjects) do
+			if drawings.Bars[barDef.Name] then
+				safeDestroy(drawings.Bars[barDef.Name].Outline)
+				safeDestroy(drawings.Bars[barDef.Name].Fill)
+				drawings.Bars[barDef.Name] = nil
 			end
-		end,
-	}
+		end
+		handle.Removed = true
+	end
+
+	function handle.SetColor(color)
+		barDef.Color = color
+		barDef.LerpColor = false
+	end
+
+	function handle.SetSide(side)
+		barDef.Side = side
+	end
+
+	function handle.SetWidth(width)
+		barDef.Width = width
+	end
+
+	function handle.SetGroups(groups)
+		barDef.Groups = groups
+	end
+
+	return handle
 end
+
+-- ============================================================
+-- Unload
+-- ============================================================
+
+local function unload()
+	if renderConnection then
+		renderConnection:Disconnect()
+		renderConnection = nil
+	end
+
+	for _, conn in ipairs(Connections) do
+		pcall(function()
+			conn:Disconnect()
+		end)
+	end
+	table.clear(Connections)
+
+	-- Collect keys first to avoid mutating the table during iteration
+	local toRemove = {}
+	for instance in pairs(ESPObjects) do
+		table.insert(toRemove, instance)
+	end
+	for _, instance in ipairs(toRemove) do
+		removeESP(instance)
+	end
+
+	table.clear(CustomBars)
+	table.clear(GroupClassifiers)
+end
+
+-- ============================================================
+-- Public API
+-- ============================================================
 
 return {
 	Config = ESPConfig,
