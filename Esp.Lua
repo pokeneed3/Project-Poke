@@ -19,7 +19,7 @@ local ESPConfig = {
 	BoxStyle = "Square", -- "Square" | "Corners" | "Filled" | "3D"
 	BoxThickness = 1,
 	BoxTransparency = 1,
-	FixedBoxSize = Vector2.new(5, 15), -- width, height in pixels (constant at any distance)
+	FixedBoxSize = Vector2.new(60, 100), -- width, height in pixels (CONSTANT at any distance)
 	CornerLength = 0.25, -- fraction of box side, for "Corners"
 	MaxDistance = math.huge, -- studs; hide beyond this
 	TeamCheck = false,
@@ -31,6 +31,10 @@ local ESPConfig = {
 	BarColor = nil, -- nil = use per-bar Color / LerpColor
 	OcclusionCheck = false, -- raycast from camera to root
 	Padding = 0, -- extra pixels around box
+
+	-- If true, the box will scale with the character's world-space size
+	-- instead of staying a fixed pixel size. Default false = constant size.
+	ScaleWithDistance = false,
 
 	-- Optional global text formatter.
 	-- Signature: function(target, char, distance, group) -> string
@@ -505,6 +509,10 @@ end
 -- Box drawing
 -- ============================================================
 
+-- Projects the target to screen space.
+-- If ScaleWithDistance is false (default), the box is a FIXED pixel
+-- size (FixedBoxSize) regardless of how far the target is from the camera.
+-- If true, it scales with the character's world-space extents.
 local function projectBox(cf, size, group)
 	local center = cf.Position
 	local centerScreen = Camera:WorldToViewportPoint(center)
@@ -513,10 +521,43 @@ local function projectBox(cf, size, group)
 		return nil
 	end
 
-	-- Fixed pixel size (per-group override supported via getSetting)
-	local fixed = getSetting(group, "FixedBoxSize") or Vector2.new(40, 80)
-	local screenWidth = fixed.X
-	local screenHeight = fixed.Y
+	local screenWidth, screenHeight
+
+	if getSetting(group, "ScaleWithDistance") then
+		-- Optional: project the world-space extents into screen space.
+		-- This WILL change with distance.
+		local half = size * 0.5
+		local corners = {
+			cf * Vector3.new(-half.X, -half.Y, -half.Z),
+			cf * Vector3.new(half.X, -half.Y, -half.Z),
+			cf * Vector3.new(-half.X, half.Y, -half.Z),
+			cf * Vector3.new(half.X, half.Y, -half.Z),
+			cf * Vector3.new(-half.X, -half.Y, half.Z),
+			cf * Vector3.new(half.X, -half.Y, half.Z),
+			cf * Vector3.new(-half.X, half.Y, half.Z),
+			cf * Vector3.new(half.X, half.Y, half.Z),
+		}
+		local minX, minY = math.huge, math.huge
+		local maxX, maxY = -math.huge, -math.huge
+		for _, corner in ipairs(corners) do
+			local sp = Camera:WorldToViewportPoint(corner)
+			if sp.Z > 0 then
+				minX = math.min(minX, sp.X)
+				minY = math.min(minY, sp.Y)
+				maxX = math.max(maxX, sp.X)
+				maxY = math.max(maxY, sp.Y)
+			end
+		end
+		if minX == math.huge then
+			return nil
+		end
+		return minX, minY, maxX, maxY
+	end
+
+	-- Default: fixed pixel size — does NOT change with distance.
+	local fixed = getSetting(group, "FixedBoxSize") or Vector2.new(60, 100)
+	screenWidth = fixed.X
+	screenHeight = fixed.Y
 
 	local minX = centerScreen.X - screenWidth * 0.5
 	local maxX = centerScreen.X + screenWidth * 0.5
@@ -970,8 +1011,6 @@ local function unload()
 	table.clear(CustomBars)
 	table.clear(GroupClassifiers)
 end
-
-print("test")
 
 -- ============================================================
 -- Public API
