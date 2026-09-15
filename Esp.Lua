@@ -18,7 +18,6 @@ local ESPConfig = {
 	TextSize = 14,
 	BoxStyle = "Square", -- "Square" | "Corners" | "Filled" | "3D"
 	BoxThickness = 1,
-	-- 1 = fully solid, 0 = fully invisible. Inverted internally for Drawing API.
 	BoxTransparency = 1,
 	CornerLength = 0.25, -- fraction of box side, for "Corners"
 	MaxDistance = math.huge, -- studs; hide beyond this
@@ -33,7 +32,7 @@ local ESPConfig = {
 	Padding = 0, -- extra pixels around box
 
 	-- Optional global text formatter.
-	-- Signature: function(instance, char, distance, group) -> string
+	-- Signature: function(target, char, distance, group) -> string
 	FormatText = nil,
 
 	-- Fallback group config applied when a group has no explicit key.
@@ -43,7 +42,6 @@ local ESPConfig = {
 	-- Groups = {
 	--   Player = { BoxColor = Color3.fromRGB(255,0,0) },
 	--   NPC    = { BoxColor = Color3.fromRGB(0,255,0), MaxDistance = 500 },
-	--   Default = { ... }, -- applied to every group that doesn't override
 	-- }
 	Groups = {},
 }
@@ -198,10 +196,6 @@ local RefreshGroup = function(instance)
 		return
 	end
 	drawings.Target.Group = newGroup
-
-	-- Keep name styling in sync with the new group
-	drawings.Name.Color = getSetting(newGroup, "TextColor")
-	drawings.Name.Size = getSetting(newGroup, "TextSize")
 
 	for _, barDef in ipairs(CustomBars) do
 		local applies = not barDef.Groups or table.find(barDef.Groups, newGroup) ~= nil
@@ -420,15 +414,9 @@ local function isValidCharacter(target)
 	end
 
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
-	local root = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
-
-	if not root then
-		-- Only accept a loose BasePart fallback for non-Humanoid models
-		if humanoid then
-			return nil
-		end
-		root = model:FindFirstChildWhichIsA("BasePart")
-	end
+	local root = model:FindFirstChild("HumanoidRootPart")
+		or model.PrimaryPart
+		or model:FindFirstChildWhichIsA("BasePart")
 
 	if root and (not humanoid or humanoid.Health > 0) then
 		return model, root, humanoid
@@ -437,13 +425,13 @@ local function isValidCharacter(target)
 end
 
 -- Get world-space corners of the model's bounding box.
--- Returns: cf, size (Vector3s) or nil if it can't be computed.
+-- Returns: min, max, size (Vector3s) or nil if it can't be computed.
 local function getWorldBoundingBox(model)
 	local ok, cf, size = pcall(function()
 		return model:GetBoundingBox()
 	end)
 
-	if ok and cf and size and size.Magnitude >= 1 then
+	if ok and cf and size then
 		return cf, size
 	end
 
@@ -455,14 +443,14 @@ local function getWorldBoundingBox(model)
 	local ok2, size2 = pcall(function()
 		return model:GetExtentsSize()
 	end)
-	if not ok2 or not size2 or size2.Magnitude < 1 then
+	if not ok2 then
 		return nil
 	end
 	return primary.CFrame, size2
 end
 
 -- Project the 8 corners of an oriented box into screen space.
--- Returns: minX, minY, maxX, maxY or nil if the box is unusable.
+-- Returns: minX, minY, maxX, maxY, allOnScreen
 local function projectBox(cf, size)
 	local half = size * 0.5
 	local corners = {
@@ -481,43 +469,27 @@ local function projectBox(cf, size)
 	local anyFront = false
 
 	for _, worldPos in ipairs(corners) do
-		local sp = Camera:WorldToViewportPoint(worldPos)
+		local sp, onScreen = Camera:WorldToViewportPoint(worldPos)
 		if sp.Z > 0 then
 			anyFront = true
-			minX = math.min(minX, sp.X)
-			minY = math.min(minY, sp.Y)
-			maxX = math.max(maxX, sp.X)
-			maxY = math.max(maxY, sp.Y)
+			if sp.X < minX then
+				minX = sp.X
+			end
+			if sp.Y < minY then
+				minY = sp.Y
+			end
+			if sp.X > maxX then
+				maxX = sp.X
+			end
+			if sp.Y > maxY then
+				maxY = sp.Y
+			end
 		end
 	end
 
 	if not anyFront then
 		return nil
 	end
-
-	local w = maxX - minX
-	local h = maxY - minY
-
-	-- Reject degenerate (all corners collapsed) projections
-	if w < 1 or h < 1 then
-		return nil
-	end
-
-	-- Reject exploded projections (camera inside/near the box).
-	-- A normal on-screen character is nowhere near this big.
-	if w > 4000 or h > 4000 then
-		return nil
-	end
-
-	-- Clamp to a reasonable range around the viewport so a single
-	-- far-off corner can't stretch the box weirdly.
-	local vp = Camera.ViewportSize
-	local margin = 2000
-	minX = math.clamp(minX, -margin, vp.X + margin)
-	maxX = math.clamp(maxX, -margin, vp.X + margin)
-	minY = math.clamp(minY, -margin, vp.Y + margin)
-	maxY = math.clamp(maxY, -margin, vp.Y + margin)
-
 	return minX, minY, maxX, maxY
 end
 
@@ -529,8 +501,7 @@ local function drawBox(drawings, group, x, y, w, h)
 	local box = drawings.Box
 	local color = getSetting(group, "BoxColor")
 	local thickness = getSetting(group, "BoxThickness")
-	-- Config: 1 = solid, 0 = invisible. Drawing API: 1 = invisible, 0 = solid.
-	local transparency = 1 - getSetting(group, "BoxTransparency")
+	local transparency = getSetting(group, "BoxTransparency")
 	local wantedStyle = getSetting(group, "BoxStyle")
 
 	-- Rebuild drawings if the style changed at runtime
@@ -628,12 +599,6 @@ local function hideESP(drawings)
 end
 
 local function updateTarget(instance, drawings)
-	-- Guard against a nil camera (rare, but possible during load / teardown)
-	if not Camera then
-		hideESP(drawings)
-		return
-	end
-
 	local target = drawings.Target
 	local group = target.Group
 
@@ -654,12 +619,6 @@ local function updateTarget(instance, drawings)
 	local distance = (Camera.CFrame.Position - root.Position).Magnitude
 	local maxDist = getSetting(group, "MaxDistance")
 	if maxDist and distance > maxDist then
-		hideESP(drawings)
-		return
-	end
-
-	-- Too close: projection is unreliable and causes giant bars
-	if distance < 4 then
 		hideESP(drawings)
 		return
 	end
@@ -715,58 +674,12 @@ local function updateTarget(instance, drawings)
 		hideBoxDrawings(drawings.Box)
 	end
 
-	-- Name
-	if getSetting(group, "ShowName") then
-		local nameText = target.GetName()
-		if getSetting(group, "ShowDistance") then
-			nameText = string.format("%s [%d]", nameText, math.floor(distance))
-		end
-		if ESPConfig.FormatText then
-			local ok, formatted = pcall(ESPConfig.FormatText, instance, char, distance, group)
-			if ok and formatted then
-				nameText = formatted
-			elseif not ok then
-				warn("[ESP] FormatText errored:", formatted)
-			end
-		end
-		drawings.Name.Text = nameText
-		drawings.Name.Color = getSetting(group, "TextColor")
-		drawings.Name.Size = getSetting(group, "TextSize")
-		drawings.Name.Position = Vector2.new(boxX + width / 2, boxY - drawings.Name.Size - 2)
-		drawings.Name.Visible = true
-	else
-		drawings.Name.Visible = false
-	end
-
 	-- Bars
 	if getSetting(group, "ShowBars") then
 		local leftOffset = 4
 		local rightOffset = 4
 		local bottomOffset = 4
 		local barSpacing = 2
-
-		-- Fixed pixel size for bars so they don't scale with distance.
-		-- Bars are anchored to the box but keep a constant on-screen size.
-		-- Clamped with the same limits used by projectBox() so a bar can
-		-- never blow up or drift off-screen like an unclamped box could.
-		local FIXED_BAR_HEIGHT = 40 -- pixels, vertical bars (Left/Right)
-		local FIXED_BAR_WIDTH = 40 -- pixels, horizontal bars (Bottom)
-		local MIN_BAR_SIZE = 1
-		local MAX_BAR_SIZE = 4000
-		local SCREEN_MARGIN = 2000
-		local vp = Camera.ViewportSize
-
-		local barBoxHeight = math.clamp(FIXED_BAR_HEIGHT, MIN_BAR_SIZE, MAX_BAR_SIZE)
-		local barBoxWidth = math.clamp(FIXED_BAR_WIDTH, MIN_BAR_SIZE, MAX_BAR_SIZE)
-
-		local function clampPos(x, y)
-			return math.clamp(x, -SCREEN_MARGIN, vp.X + SCREEN_MARGIN),
-				math.clamp(y, -SCREEN_MARGIN, vp.Y + SCREEN_MARGIN)
-		end
-
-		local function clampSize(w, h)
-			return math.clamp(w, MIN_BAR_SIZE, MAX_BAR_SIZE), math.clamp(h, MIN_BAR_SIZE, MAX_BAR_SIZE)
-		end
 
 		for _, barDef in ipairs(CustomBars) do
 			local barDrawings = drawings.Bars[barDef.Name]
@@ -776,58 +689,38 @@ local function updateTarget(instance, drawings)
 				local ratio = math.clamp((curVal or 0) / maxVal, 0, 1)
 				local barWidth = barDef.Width or 2
 
-				local outX, outY, outW, outH
-				local fillX, fillY, fillW, fillH
-
 				if barDef.Side == "Right" then
 					local barX = boxX + width + rightOffset
 					rightOffset = rightOffset + barWidth + barSpacing + 2
 
-					outX, outY = barX - 1, boxY - 1
-					outW, outH = barWidth + 2, barBoxHeight + 2
+					barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
+					barDrawings.Outline.Size = Vector2.new(barWidth + 2, height + 2)
 
-					local barHeight = math.clamp(math.floor(barBoxHeight * ratio), 0, barBoxHeight)
-					fillX = barX
-					fillY = boxY + (barBoxHeight - barHeight)
-					fillW = barWidth
-					fillH = barHeight
+					local barHeight = math.floor(height * ratio)
+					barDrawings.Fill.Position = Vector2.new(barX, boxY + (height - barHeight))
+					barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
 				elseif barDef.Side == "Bottom" then
 					local barY = boxY + height + bottomOffset
 					bottomOffset = bottomOffset + barWidth + barSpacing + 2
 
-					outX, outY = boxX - 1, barY - 1
-					outW, outH = barBoxWidth + 2, barWidth + 2
+					barDrawings.Outline.Position = Vector2.new(boxX - 1, barY - 1)
+					barDrawings.Outline.Size = Vector2.new(width + 2, barWidth + 2)
 
-					local fillWidth = math.clamp(math.floor(barBoxWidth * ratio), 0, barBoxWidth)
-					fillX = boxX
-					fillY = barY
-					fillW = fillWidth
-					fillH = barWidth
+					local fillWidth = math.floor(width * ratio)
+					barDrawings.Fill.Position = Vector2.new(boxX, barY)
+					barDrawings.Fill.Size = Vector2.new(fillWidth, barWidth)
 				else -- "Left"
 					leftOffset = leftOffset + barWidth
 					local barX = boxX - leftOffset
 					leftOffset = leftOffset + barSpacing + 2
 
-					outX, outY = barX - 1, boxY - 1
-					outW, outH = barWidth + 2, barBoxHeight + 2
+					barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
+					barDrawings.Outline.Size = Vector2.new(barWidth + 2, height + 2)
 
-					local barHeight = math.clamp(math.floor(barBoxHeight * ratio), 0, barBoxHeight)
-					fillX = barX
-					fillY = boxY + (barBoxHeight - barHeight)
-					fillW = barWidth
-					fillH = barHeight
+					local barHeight = math.floor(height * ratio)
+					barDrawings.Fill.Position = Vector2.new(barX, boxY + (height - barHeight))
+					barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
 				end
-
-				-- Clamp positions / sizes the same way projectBox() clamps the box
-				outX, outY = clampPos(outX, outY)
-				outW, outH = clampSize(outW, outH)
-				fillX, fillY = clampPos(fillX, fillY)
-				fillW, fillH = clampSize(fillW, fillH)
-
-				barDrawings.Outline.Position = Vector2.new(outX, outY)
-				barDrawings.Outline.Size = Vector2.new(outW, outH)
-				barDrawings.Fill.Position = Vector2.new(fillX, fillY)
-				barDrawings.Fill.Size = Vector2.new(fillW, fillH)
 
 				-- Color: per-group BarColor > per-bar Color/Lerp > default
 				local groupBarColor = ESPConfig.Groups[group] and ESPConfig.Groups[group].BarColor
@@ -848,6 +741,45 @@ local function updateTarget(instance, drawings)
 			barDrawings.Outline.Visible = false
 			barDrawings.Fill.Visible = false
 		end
+	end
+
+	-- Text label
+	local showName = getSetting(group, "ShowName")
+	local showDist = getSetting(group, "ShowDistance")
+
+	if showName or showDist then
+		local finalText
+
+		if ESPConfig.FormatText then
+			local ok, result = pcall(ESPConfig.FormatText, target, char, distance, group)
+			if ok and result then
+				finalText = result
+			end
+		end
+
+		if not finalText then
+			local parts = {}
+			if showName then
+				table.insert(parts, target.GetName())
+			end
+			if showDist then
+				table.insert(parts, "[" .. math.floor(distance) .. "m]")
+			end
+			finalText = table.concat(parts, " ")
+		end
+
+		if #finalText > 0 then
+			local textSize = getSetting(group, "TextSize")
+			drawings.Name.Text = finalText
+			drawings.Name.Color = getSetting(group, "TextColor")
+			drawings.Name.Size = textSize
+			drawings.Name.Position = Vector2.new((minX + maxX) / 2, boxY - textSize - 4)
+			drawings.Name.Visible = true
+		else
+			drawings.Name.Visible = false
+		end
+	else
+		drawings.Name.Visible = false
 	end
 end
 
@@ -918,9 +850,6 @@ local function NewBar(args)
 	local handle = {}
 
 	function handle.Remove()
-		if handle.Removed then
-			return
-		end
 		for i, def in ipairs(CustomBars) do
 			if def.Name == barDef.Name then
 				table.remove(CustomBars, i)
@@ -943,7 +872,6 @@ local function NewBar(args)
 	end
 
 	function handle.SetSide(side)
-		assert(side == "Left" or side == "Right" or side == "Bottom", "Invalid bar side: " .. tostring(side))
 		barDef.Side = side
 	end
 
