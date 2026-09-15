@@ -711,14 +711,23 @@ local function updateTarget(instance, drawings)
 
 		-- Fixed pixel size for bars so they don't scale with distance.
 		-- Bars are anchored to the box but keep a constant on-screen size.
+		-- Clamped so they never exceed the box (or barDef.MaxSize).
 		local FIXED_BAR_HEIGHT = 40 -- pixels, vertical bars (Left/Right)
 		local FIXED_BAR_WIDTH = 40 -- pixels, horizontal bars (Bottom)
-		local barBoxHeight = FIXED_BAR_HEIGHT
-		local barBoxWidth = FIXED_BAR_WIDTH
 
 		for _, barDef in ipairs(CustomBars) do
 			local barDrawings = drawings.Bars[barDef.Name]
 			if barDrawings then
+				-- Clamp to box size so bars never overflow the ESP box
+				local barBoxHeight = math.min(FIXED_BAR_HEIGHT, height)
+				local barBoxWidth = math.min(FIXED_BAR_WIDTH, width)
+
+				-- Optional per-bar hard cap
+				if barDef.MaxSize then
+					barBoxHeight = math.min(barBoxHeight, barDef.MaxSize)
+					barBoxWidth = math.min(barBoxWidth, barDef.MaxSize)
+				end
+
 				local curVal, maxVal = barDef.GetValue(char, instance)
 				maxVal = (maxVal and maxVal > 0) and maxVal or 100
 				local ratio = math.clamp((curVal or 0) / maxVal, 0, 1)
@@ -872,6 +881,7 @@ local function NewBar(args)
 		LerpColor = args.LerpColor or false,
 		GetValue = args.GetValue,
 		Groups = args.Groups,
+		MaxSize = args.MaxSize, -- optional: cap bar length in pixels
 	}
 
 	table.insert(CustomBars, barDef)
