@@ -702,7 +702,8 @@ local function updateTarget(instance, drawings)
 		hideBoxDrawings(drawings.Box)
 	end
 
-	-- Bars
+	
+		-- Bars
 	if getSetting(group, "ShowBars") then
 		local leftOffset = 4
 		local rightOffset = 4
@@ -711,60 +712,88 @@ local function updateTarget(instance, drawings)
 
 		-- Fixed pixel size for bars so they don't scale with distance.
 		-- Bars are anchored to the box but keep a constant on-screen size.
-		-- Clamped so they never exceed the box (or barDef.MaxSize).
+		-- Clamped with the same limits used by projectBox() so a bar can
+		-- never blow up or drift off-screen like an unclamped box could.
 		local FIXED_BAR_HEIGHT = 40 -- pixels, vertical bars (Left/Right)
 		local FIXED_BAR_WIDTH = 40 -- pixels, horizontal bars (Bottom)
+		local MIN_BAR_SIZE = 1
+		local MAX_BAR_SIZE = 4000
+		local SCREEN_MARGIN = 2000
+		local vp = Camera.ViewportSize
+
+		local barBoxHeight = math.clamp(FIXED_BAR_HEIGHT, MIN_BAR_SIZE, MAX_BAR_SIZE)
+		local barBoxWidth = math.clamp(FIXED_BAR_WIDTH, MIN_BAR_SIZE, MAX_BAR_SIZE)
+
+		local function clampPos(x, y)
+			return math.clamp(x, -SCREEN_MARGIN, vp.X + SCREEN_MARGIN),
+				math.clamp(y, -SCREEN_MARGIN, vp.Y + SCREEN_MARGIN)
+		end
+
+		local function clampSize(w, h)
+			return math.clamp(w, MIN_BAR_SIZE, MAX_BAR_SIZE),
+				math.clamp(h, MIN_BAR_SIZE, MAX_BAR_SIZE)
+		end
 
 		for _, barDef in ipairs(CustomBars) do
 			local barDrawings = drawings.Bars[barDef.Name]
 			if barDrawings then
-				-- Clamp to box size so bars never overflow the ESP box
-				local barBoxHeight = math.min(FIXED_BAR_HEIGHT, height)
-				local barBoxWidth = math.min(FIXED_BAR_WIDTH, width)
-
-				-- Optional per-bar hard cap
-				if barDef.MaxSize then
-					barBoxHeight = math.min(barBoxHeight, barDef.MaxSize)
-					barBoxWidth = math.min(barBoxWidth, barDef.MaxSize)
-				end
-
 				local curVal, maxVal = barDef.GetValue(char, instance)
 				maxVal = (maxVal and maxVal > 0) and maxVal or 100
 				local ratio = math.clamp((curVal or 0) / maxVal, 0, 1)
 				local barWidth = barDef.Width or 2
 
+				local outX, outY, outW, outH
+				local fillX, fillY, fillW, fillH
+
 				if barDef.Side == "Right" then
 					local barX = boxX + width + rightOffset
 					rightOffset = rightOffset + barWidth + barSpacing + 2
 
-					barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
-					barDrawings.Outline.Size = Vector2.new(barWidth + 2, barBoxHeight + 2)
+					outX, outY = barX - 1, boxY - 1
+					outW, outH = barWidth + 2, barBoxHeight + 2
 
 					local barHeight = math.clamp(math.floor(barBoxHeight * ratio), 0, barBoxHeight)
-					barDrawings.Fill.Position = Vector2.new(barX, boxY + (barBoxHeight - barHeight))
-					barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
+					fillX = barX
+					fillY = boxY + (barBoxHeight - barHeight)
+					fillW = barWidth
+					fillH = barHeight
 				elseif barDef.Side == "Bottom" then
 					local barY = boxY + height + bottomOffset
 					bottomOffset = bottomOffset + barWidth + barSpacing + 2
 
-					barDrawings.Outline.Position = Vector2.new(boxX - 1, barY - 1)
-					barDrawings.Outline.Size = Vector2.new(barBoxWidth + 2, barWidth + 2)
+					outX, outY = boxX - 1, barY - 1
+					outW, outH = barBoxWidth + 2, barWidth + 2
 
 					local fillWidth = math.clamp(math.floor(barBoxWidth * ratio), 0, barBoxWidth)
-					barDrawings.Fill.Position = Vector2.new(boxX, barY)
-					barDrawings.Fill.Size = Vector2.new(fillWidth, barWidth)
+					fillX = boxX
+					fillY = barY
+					fillW = fillWidth
+					fillH = barWidth
 				else -- "Left"
 					leftOffset = leftOffset + barWidth
 					local barX = boxX - leftOffset
 					leftOffset = leftOffset + barSpacing + 2
 
-					barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
-					barDrawings.Outline.Size = Vector2.new(barWidth + 2, barBoxHeight + 2)
+					outX, outY = barX - 1, boxY - 1
+					outW, outH = barWidth + 2, barBoxHeight + 2
 
 					local barHeight = math.clamp(math.floor(barBoxHeight * ratio), 0, barBoxHeight)
-					barDrawings.Fill.Position = Vector2.new(barX, boxY + (barBoxHeight - barHeight))
-					barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
+					fillX = barX
+					fillY = boxY + (barBoxHeight - barHeight)
+					fillW = barWidth
+					fillH = barHeight
 				end
+
+				-- Clamp positions / sizes the same way projectBox() clamps the box
+				outX, outY = clampPos(outX, outY)
+				outW, outH = clampSize(outW, outH)
+				fillX, fillY = clampPos(fillX, fillY)
+				fillW, fillH = clampSize(fillW, fillH)
+
+				barDrawings.Outline.Position = Vector2.new(outX, outY)
+				barDrawings.Outline.Size = Vector2.new(outW, outH)
+				barDrawings.Fill.Position = Vector2.new(fillX, fillY)
+				barDrawings.Fill.Size = Vector2.new(fillW, fillH)
 
 				-- Color: per-group BarColor > per-bar Color/Lerp > default
 				local groupBarColor = ESPConfig.Groups[group] and ESPConfig.Groups[group].BarColor
@@ -786,46 +815,6 @@ local function updateTarget(instance, drawings)
 			barDrawings.Fill.Visible = false
 		end
 	end
-
-	-- Text label
-	local showName = getSetting(group, "ShowName")
-	local showDist = getSetting(group, "ShowDistance")
-
-	if showName or showDist then
-		local finalText
-
-		if ESPConfig.FormatText then
-			local ok, result = pcall(ESPConfig.FormatText, target, char, distance, group)
-			if ok and result then
-				finalText = result
-			end
-		end
-
-		if not finalText then
-			local parts = {}
-			if showName then
-				table.insert(parts, target.GetName())
-			end
-			if showDist then
-				table.insert(parts, "[" .. math.floor(distance) .. "m]")
-			end
-			finalText = table.concat(parts, " ")
-		end
-
-		if #finalText > 0 then
-			local textSize = getSetting(group, "TextSize")
-			drawings.Name.Text = finalText
-			drawings.Name.Color = getSetting(group, "TextColor")
-			drawings.Name.Size = textSize
-			drawings.Name.Position = Vector2.new((minX + maxX) / 2, boxY - textSize - 4)
-			drawings.Name.Visible = true
-		else
-			drawings.Name.Visible = false
-		end
-	else
-		drawings.Name.Visible = false
-	end
-end
 
 -- ============================================================
 -- Render loop
@@ -881,7 +870,6 @@ local function NewBar(args)
 		LerpColor = args.LerpColor or false,
 		GetValue = args.GetValue,
 		Groups = args.Groups,
-		MaxSize = args.MaxSize, -- optional: cap bar length in pixels
 	}
 
 	table.insert(CustomBars, barDef)
@@ -960,7 +948,7 @@ local function unload()
 	table.clear(CustomBars)
 	table.clear(GroupClassifiers)
 end
-print("test")
+
 -- ============================================================
 -- Public API
 -- ============================================================
