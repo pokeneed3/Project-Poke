@@ -960,7 +960,7 @@ local function unload()
 	table.clear(CustomBars)
 	table.clear(GroupClassifiers)
 end
-
+print("test")
 -- ============================================================
 -- Public API
 -- ============================================================
