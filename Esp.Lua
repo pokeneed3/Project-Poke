@@ -18,6 +18,7 @@ local ESPConfig = {
 	TextSize = 14,
 	BoxStyle = "Square", -- "Square" | "Corners" | "Filled" | "3D"
 	BoxThickness = 1,
+	-- 1 = fully solid, 0 = fully invisible. Inverted internally for Drawing API.
 	BoxTransparency = 1,
 	CornerLength = 0.25, -- fraction of box side, for "Corners"
 	MaxDistance = math.huge, -- studs; hide beyond this
@@ -32,7 +33,7 @@ local ESPConfig = {
 	Padding = 0, -- extra pixels around box
 
 	-- Optional global text formatter.
-	-- Signature: function(target, char, distance, group) -> string
+	-- Signature: function(instance, char, distance, group) -> string
 	FormatText = nil,
 
 	-- Fallback group config applied when a group has no explicit key.
@@ -42,6 +43,7 @@ local ESPConfig = {
 	-- Groups = {
 	--   Player = { BoxColor = Color3.fromRGB(255,0,0) },
 	--   NPC    = { BoxColor = Color3.fromRGB(0,255,0), MaxDistance = 500 },
+	--   Default = { ... }, -- applied to every group that doesn't override
 	-- }
 	Groups = {},
 }
@@ -196,6 +198,10 @@ local RefreshGroup = function(instance)
 		return
 	end
 	drawings.Target.Group = newGroup
+
+	-- Keep name styling in sync with the new group
+	drawings.Name.Color = getSetting(newGroup, "TextColor")
+	drawings.Name.Size = getSetting(newGroup, "TextSize")
 
 	for _, barDef in ipairs(CustomBars) do
 		local applies = not barDef.Groups or table.find(barDef.Groups, newGroup) ~= nil
@@ -523,7 +529,8 @@ local function drawBox(drawings, group, x, y, w, h)
 	local box = drawings.Box
 	local color = getSetting(group, "BoxColor")
 	local thickness = getSetting(group, "BoxThickness")
-	local transparency = getSetting(group, "BoxTransparency")
+	-- Config: 1 = solid, 0 = invisible. Drawing API: 1 = invisible, 0 = solid.
+	local transparency = 1 - getSetting(group, "BoxTransparency")
 	local wantedStyle = getSetting(group, "BoxStyle")
 
 	-- Rebuild drawings if the style changed at runtime
@@ -621,6 +628,12 @@ local function hideESP(drawings)
 end
 
 local function updateTarget(instance, drawings)
+	-- Guard against a nil camera (rare, but possible during load / teardown)
+	if not Camera then
+		hideESP(drawings)
+		return
+	end
+
 	local target = drawings.Target
 	local group = target.Group
 
@@ -700,6 +713,29 @@ local function updateTarget(instance, drawings)
 		drawBox(drawings, group, boxX, boxY, width, height)
 	else
 		hideBoxDrawings(drawings.Box)
+	end
+
+	-- Name
+	if getSetting(group, "ShowName") then
+		local nameText = target.GetName()
+		if getSetting(group, "ShowDistance") then
+			nameText = string.format("%s [%d]", nameText, math.floor(distance))
+		end
+		if ESPConfig.FormatText then
+			local ok, formatted = pcall(ESPConfig.FormatText, instance, char, distance, group)
+			if ok and formatted then
+				nameText = formatted
+			elseif not ok then
+				warn("[ESP] FormatText errored:", formatted)
+			end
+		end
+		drawings.Name.Text = nameText
+		drawings.Name.Color = getSetting(group, "TextColor")
+		drawings.Name.Size = getSetting(group, "TextSize")
+		drawings.Name.Position = Vector2.new(boxX + width / 2, boxY - drawings.Name.Size - 2)
+		drawings.Name.Visible = true
+	else
+		drawings.Name.Visible = false
 	end
 
 	-- Bars
@@ -814,6 +850,7 @@ local function updateTarget(instance, drawings)
 		end
 	end
 end
+
 -- ============================================================
 -- Render loop
 -- ============================================================
@@ -881,6 +918,9 @@ local function NewBar(args)
 	local handle = {}
 
 	function handle.Remove()
+		if handle.Removed then
+			return
+		end
 		for i, def in ipairs(CustomBars) do
 			if def.Name == barDef.Name then
 				table.remove(CustomBars, i)
@@ -903,6 +943,7 @@ local function NewBar(args)
 	end
 
 	function handle.SetSide(side)
+		assert(side == "Left" or side == "Right" or side == "Bottom", "Invalid bar side: " .. tostring(side))
 		barDef.Side = side
 	end
 
