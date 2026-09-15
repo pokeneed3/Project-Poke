@@ -39,10 +39,16 @@ ESPGroups.NPC = ESPGroups.NPC or {}
 ESPGroups.Drop = ESPGroups.Drop or {}
 ESPGroups.Chest = ESPGroups.Chest or {}
 
-ESPGroups.NPC.ShowHealth = false
+ESPGroups.Player.ShowName = true
+ESPGroups.Player.ShowDistance = true
+ESPGroups.Player.ShowBars = true
+
+ESPConfig.ShowBars = false
+
+ESPGroups.NPC.ShowBars = false
 ESPGroups.NPC.ShowBox = false
-ESPGroups.Chest.ShowHealth = false
-ESPGroups.Drop.ShowHealth = false
+ESPGroups.Chest.ShowBars = false
+ESPGroups.Drop.ShowBars = false
 ESPGroups.Drop.ShowBox = false
 ESPGroups.Chest.ShowBox = false
 
@@ -208,7 +214,7 @@ General:AddToggle("Speed", {
 MainSettings:AddSlider("SpeedSlider", {
 	Text = "Speed",
 	Default = Speed,
-	Min = 1,
+	Min = 10,
 	Max = 250,
 	Rounding = 0,
 	Compact = false,
@@ -338,7 +344,7 @@ General:AddToggle("Noclip", {
 
 local JumpConnection
 local HoldingJump = false
-local InfJumpPowerValue = 20
+local InfJumpPowerValue = 100
 
 General:AddToggle("InfiniteJump_Toggle", {
 	Text = "Infinite Jump",
@@ -408,7 +414,7 @@ General:AddToggle("InfiniteJump_Toggle", {
 MainSettings:AddSlider("InfJumpSlider", {
 	Text = "Jump Power",
 	Default = InfJumpPowerValue,
-	Min = InfJumpPowerValue,
+	Min = 10,
 	Max = 500,
 	Rounding = 0,
 	Compact = false,
@@ -481,15 +487,13 @@ local function addGroupToggle(groupName, key, label)
 	end
 	config[key] = defaultValue
 
-	-- Map which keys get a color picker, and to which config key
 	local colorKey
 	if key == "ShowBox" then
 		colorKey = "BoxColor"
-	elseif key == "ShowHealth" then
+	elseif key == "ShowBars" then
 		colorKey = "BarColor"
 	elseif key == "ShowName" then
 		colorKey = "TextColor"
-		-- key == "ShowDistance" → no colorKey, no picker
 	end
 
 	local toggle = TempStorageVisualTabBoxSettings:AddToggle(optionName, {
@@ -503,7 +507,6 @@ local function addGroupToggle(groupName, key, label)
 	if colorKey then
 		local defaultColor = config[colorKey] or ESPConfig[colorKey] or Color3.new(1, 1, 1)
 		config[colorKey] = defaultColor
-
 		toggle:AddColorPicker(optionName .. "_Color", {
 			Default = defaultColor,
 			Title = "Color",
@@ -520,7 +523,7 @@ for _, groupName in ipairs({ "Player", "Monster", "NPC", "Drop", "Chest" }) do
 	if groupName == "NPC" or groupName == "Drop" or groupName == "Chest" then
 		continue
 	else
-		addGroupToggle(groupName, "ShowHealth", "Health Bar")
+		addGroupToggle(groupName, "ShowBars", "Health Bar")
 		addGroupToggle(groupName, "ShowBox", "Box")
 	end
 end
@@ -554,11 +557,11 @@ TempStorageVisualTabBoxMain:AddToggle("ESP_DisplayName", {
 })
 
 -- Health % Toggle
-TempStorageVisualTabBoxMain:AddToggle("ESP_ShowHealth", {
-	Text = "Show Health %",
-	Default = ESPConfig.ShowHealth == nil and true or ESPConfig.ShowHealth,
+TempStorageVisualTabBoxMain:AddToggle("ESP_ShowBars", {
+	Text = "Show Health Bars",
+	Default = ESPConfig.ShowBars,
 	Callback = function(Value)
-		ESPConfig.ShowHealth = Value
+		ESPConfig.ShowBars = Value
 	end,
 })
 
