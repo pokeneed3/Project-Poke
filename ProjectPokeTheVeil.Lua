@@ -2,6 +2,7 @@
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local Stats = game:GetService("Stats")
+local UserInputService = cloneref(game:GetService("UserInputService"))
 
 -- Variables
 local Connections = {}
@@ -205,6 +206,143 @@ MainSettings:AddSlider("SpeedSlider", {
 
 	Callback = function(Value)
 		Speed = Value
+	end,
+})
+
+local NoclipParts = {}
+local Noclipping = nil
+local Clip
+
+General:AddToggle("Noclip", {
+	Text = "Noclip",
+	Default = false,
+	Callback = function(Value)
+		if Value then
+			local player = game:GetService("Players").LocalPlayer
+			local NoclipParts = {}
+			local Noclipping = nil
+
+			pcall(function()
+				Noclipping:Disconnect()
+			end)
+
+			Clip = false
+			task.wait(0.1)
+			NoclipParts = {}
+			Noclipping = RunService.Stepped:Connect(function()
+				if Clip == false and player.Character ~= nil then
+					for _, child in pairs(player.Character:GetDescendants()) do
+						if child:IsA("BasePart") and child.CanCollide == true then
+							child.CanCollide = false
+							NoclipParts[child] = true
+						end
+					end
+				end
+			end)
+		else
+			pcall(function()
+				Noclipping:Disconnect()
+			end)
+
+			Clip = true
+			task.wait(0.1)
+			for child, _ in pairs(NoclipParts) do
+				if typeof(child) == "Instance" and child:IsA("BasePart") and child.Parent then
+					child.CanCollide = true
+				end
+			end
+			NoclipParts = {}
+		end
+	end,
+}):AddKeyPicker("Noclip_Toggle", {
+	Default = "F3",
+	Mode = "Toggle",
+	Text = "Toggle Noclip",
+	SyncToggleState = true,
+	NoUI = false,
+})
+
+local JumpConnection
+local HoldingJump = false
+local InfJumpPowerValue = 20
+
+General:AddToggle("InfiniteJump_Toggle", {
+	Text = "Infinite Jump",
+	Default = false,
+	Callback = function(Value)
+		if Value then
+			local LP = Players.LocalPlayer
+
+			-- Track held state
+			local inputBegan = UserInputService.InputBegan:Connect(function(input, gpe)
+				if gpe then
+					return
+				end
+				if input.KeyCode == Enum.KeyCode.Space then
+					HoldingJump = true
+				end
+			end)
+
+			local inputEnded = UserInputService.InputEnded:Connect(function(input)
+				if input.KeyCode == Enum.KeyCode.Space then
+					HoldingJump = false
+				end
+			end)
+
+			-- Apply continuously
+			JumpConnection = RunService.RenderStepped:Connect(function()
+				if not HoldingJump then
+					return
+				end
+				local character = LP.Character
+				if not character then
+					return
+				end
+				local root = character:FindFirstChild("HumanoidRootPart")
+				local humanoid = character:FindFirstChildOfClass("Humanoid")
+				if not (root and humanoid) or humanoid.Health <= 0 then
+					return
+				end
+
+				local power = math.max(humanoid.JumpPower, 50) + InfJumpPowerValue
+				local v = root.AssemblyLinearVelocity
+				root.AssemblyLinearVelocity = Vector3.new(v.X, power, v.Z)
+			end)
+
+			-- Cleanup hooks
+			JumpConnection = {
+				Disconnect = function()
+					inputBegan:Disconnect()
+					inputEnded:Disconnect()
+					HoldingJump = false
+				end,
+			}
+		else
+			if JumpConnection then
+				JumpConnection:Disconnect()
+				JumpConnection = nil
+			end
+			HoldingJump = false
+		end
+	end,
+}):AddKeyPicker("InfiniteJump_KeyPicker", {
+	Default = "F4",
+	Mode = "Toggle",
+	Text = "Toggle InfiniteJump",
+	SyncToggleState = true,
+	NoUI = false,
+})
+
+MainSettings:AddSlider("InfJumpSlider", {
+	Text = "JumpPower",
+	Default = InfJumpPowerValue,
+	Min = InfJumpPowerValue,
+	Max = 500,
+	Rounding = 0,
+	Compact = false,
+
+	Callback = function(Value)
+		InfJumpPowerValue = Value
 	end,
 })
 
@@ -412,7 +550,17 @@ for _, p in ipairs(Players:GetPlayers()) do
 	trackPlayer(p)
 end
 
-Players.PlayerAdded:Connect(trackPlayer)
+Players.PlayerAdded:Connect(function(player)
+	trackPlayer()
+
+	local groupId = 36025827
+
+	local roleName = player:GetRoleInGroup(groupId)
+
+	if roleName == "Owner" or roleName == "Admin" or roleName == "money tester" or roleName == "Tester" then
+		Library:Notify(`Mod in game {roleName}`)
+	end
+end)
 Players.PlayerRemoving:Connect(function(player)
 	ESP.Untrack(player)
 end)
@@ -490,7 +638,7 @@ MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", {
 	NoUI = true,
 	Text = "Menu keybind",
 })
-
+-- Library:Notify("hello")
 Library.ToggleKeybind = Options.MenuKeybind
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)

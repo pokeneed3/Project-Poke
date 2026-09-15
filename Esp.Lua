@@ -162,34 +162,36 @@ RefreshGroup = function(_, instance)
 end
 
 local function makeTarget(instance, groupOverride)
-	if instance:IsA("Player") then
-		return {
-			Instance = instance,
-			Group = groupOverride or resolveGroup(instance),
-			GetModel = function()
-				return instance.Character
-			end,
-			GetName = function()
-				return ESPConfig.UseDisplayName and instance.DisplayName or ("@" .. instance.Name)
-			end,
-			GetTeam = function()
-				return instance.Team
-			end,
-		}
-	elseif instance:IsA("Model") then
-		return {
-			Instance = instance,
-			Group = groupOverride or resolveGroup(instance),
-			GetModel = function()
-				return instance
-			end,
-			GetName = function()
-				return instance.Name
-			end,
-			GetTeam = function()
-				return nil
-			end,
-		}
+	if instance then
+		if instance:IsA("Player") then
+			return {
+				Instance = instance,
+				Group = groupOverride or resolveGroup(instance),
+				GetModel = function()
+					return instance.Character
+				end,
+				GetName = function()
+					return ESPConfig.UseDisplayName and instance.DisplayName or ("@" .. instance.Name)
+				end,
+				GetTeam = function()
+					return instance.Team
+				end,
+			}
+		elseif instance:IsA("Model") then
+			return {
+				Instance = instance,
+				Group = groupOverride or resolveGroup(instance),
+				GetModel = function()
+					return instance
+				end,
+				GetName = function()
+					return instance.Name
+				end,
+				GetTeam = function()
+					return nil
+				end,
+			}
+		end
 	end
 	return nil
 end
