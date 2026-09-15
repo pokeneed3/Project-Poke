@@ -312,7 +312,7 @@ local function makeBoxDrawings(style)
 	end
 	return d
 end
-print("Test")
+
 local function destroyBoxDrawings(box)
 	if not box then
 		return
@@ -425,7 +425,7 @@ local function isValidCharacter(target)
 end
 
 -- Get world-space corners of the model's bounding box.
--- Returns: min, max, size (Vector3s) or nil if it can't be computed.
+-- Returns: cf, size (CFrame, Vector3) or nil if it can't be computed.
 local function getWorldBoundingBox(model)
 	local ok, cf, size = pcall(function()
 		return model:GetBoundingBox()
@@ -450,7 +450,7 @@ local function getWorldBoundingBox(model)
 end
 
 -- Project the 8 corners of an oriented box into screen space.
--- Returns: minX, minY, maxX, maxY, allOnScreen
+-- Returns: minX, minY, maxX, maxY
 local function projectBox(cf, size)
 	local half = size * 0.5
 	local corners = {
@@ -723,7 +723,9 @@ local function updateTarget(instance, drawings)
 				end
 
 				-- Color: per-group BarColor > per-bar Color/Lerp > default
-				local groupBarColor = ESPConfig.Groups[group] and ESPConfig.Groups[group].BarColor
+				-- Uses the full fallback chain via getSetting so global BarColor
+				-- and Defaults.BarColor are respected.
+				local groupBarColor = getSetting(group, "BarColor")
 				if groupBarColor then
 					barDrawings.Fill.Color = groupBarColor
 				elseif barDef.LerpColor then
