@@ -27,17 +27,10 @@ local SaveManager = assert(loadstring(game:HttpGet(repo .. "addons/SaveManager.l
 local ESP = assert(loadstring(game:HttpGet("https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/Esp.Lua")))()
 local ESPConfig = ESP.Config
 
+-- Group overrides are optional. Values set here override ESPConfig globals.
 local ESPGroups = ESPConfig.Groups or {}
 ESPConfig.Groups = ESPGroups
 ESPConfig.BarColor = ESPConfig.BarColor or Color3.fromRGB(0, 255, 0)
-ESPConfig.BoxColor = ESPConfig.BoxColor or Color3.new(1, 1, 1)
-ESPConfig.TextColor = ESPConfig.TextColor or Color3.new(1, 1, 1)
-ESPConfig.ShowName = ESPConfig.ShowName ~= false
-ESPConfig.ShowHealth = ESPConfig.ShowHealth ~= false
-ESPConfig.ShowDistance = ESPConfig.ShowDistance or false
-ESPConfig.UseDisplayName = ESPConfig.UseDisplayName ~= false
-ESPConfig.Enabled = ESPConfig.Enabled or false
-
 ESPGroups.Player = ESPGroups.Player or {}
 ESPGroups.Monster = ESPGroups.Monster or {}
 ESPGroups.NPC = ESPGroups.NPC or {}
@@ -50,6 +43,8 @@ ESPGroups.Chest.ShowHealth = false
 ESPGroups.Drop.ShowHealth = false
 ESPGroups.Drop.ShowBox = false
 ESPGroups.Chest.ShowBox = false
+
+-- Linoria's global Options & Toggles tables
 
 local Window = Library:CreateWindow({
 	Title = "Project Poke",
@@ -68,6 +63,7 @@ local Tabs = {
 
 -- Functions
 
+-- ============ 2. Track mobs ============
 local watchedFolders = {}
 local watchedInstanceName = {}
 
@@ -157,6 +153,8 @@ local function unwatchFolder(folder)
 	end
 end
 
+-- watchFolder(Workspace:FindFirstChild("NPCs"))  -- add more folders as needed
+
 -------------------------------- Main Tab --------------------------------
 local TabBox = Tabs.Main:AddLeftTabbox()
 local General = TabBox:AddTab("General")
@@ -173,6 +171,7 @@ General:AddToggle("Speed", {
 			task.spawn(function()
 				SpeedConnection = RunService.Heartbeat:Connect(function()
 					local player = game:GetService("Players").LocalPlayer
+
 					local humanoid = player.Character:FindFirstChild("Humanoid")
 					local root = player.Character:FindFirstChild("HumanoidRootPart")
 					local dir = humanoid.MoveDirection
@@ -220,17 +219,14 @@ local GroupSettings = VisualSettings
 local function addGroupToggle(groupName, key, label)
 	local config = ESPGroups[groupName]
 	local optionName = "ESP_" .. groupName .. "_" .. key
-
 	local defaultValue = config[key]
+	local colorKey
+	local defaultColor = Color3.new(1, 1, 1)
+
 	if defaultValue == nil then
 		defaultValue = ESPConfig[key]
 	end
-	if defaultValue == nil then
-		defaultValue = false
-	end
-	config[key] = defaultValue
 
-	local colorKey
 	if key == "ShowBox" then
 		colorKey = "BoxColor"
 	elseif key == "ShowHealth" then
@@ -239,8 +235,7 @@ local function addGroupToggle(groupName, key, label)
 		colorKey = "TextColor"
 	end
 
-	local defaultColor = config[colorKey] or ESPConfig[colorKey] or Color3.new(1, 1, 1)
-	config[colorKey] = defaultColor
+	defaultColor = config[colorKey] or ESPConfig[colorKey] or defaultColor
 
 	GroupSettings:AddToggle(optionName, {
 		Text = groupName .. " - " .. label,
@@ -268,6 +263,7 @@ for _, groupName in ipairs({ "Player", "Monster", "NPC", "Drop", "Chest" }) do
 	end
 end
 
+-- Master ESP Toggle with Box Colorpicker attached
 VisualGeneral:AddToggle("ESP_Enabled", {
 	Text = "Enable ESP",
 	Default = ESPConfig.Enabled,
@@ -283,9 +279,10 @@ VisualGeneral:AddToggle("ESP_Enabled", {
 	end,
 })
 
+-- Name Toggle with Text Colorpicker attached
 VisualGeneral:AddToggle("ESP_ShowName", {
 	Text = "Show Name",
-	Default = ESPConfig.ShowName,
+	Default = ESPConfig.ShowName or true,
 	Callback = function(Value)
 		ESPConfig.ShowName = Value
 	end,
@@ -297,22 +294,25 @@ VisualGeneral:AddToggle("ESP_ShowName", {
 	end,
 })
 
+-- Display Name Toggle
 VisualGeneral:AddToggle("ESP_DisplayName", {
 	Text = "Use Display Name",
-	Default = ESPConfig.UseDisplayName,
+	Default = ESPConfig.UseDisplayName or true,
 	Callback = function(Value)
 		ESPConfig.UseDisplayName = Value
 	end,
 })
 
+-- Health % Toggle
 VisualGeneral:AddToggle("ESP_ShowHealth", {
 	Text = "Show Health %",
-	Default = ESPConfig.ShowHealth,
+	Default = ESPConfig.ShowHealth or true,
 	Callback = function(Value)
 		ESPConfig.ShowHealth = Value
 	end,
 })
 
+-- Distance Toggle
 VisualGeneral:AddToggle("ESP_ShowDistance", {
 	Text = "Show Distance",
 	Default = ESPConfig.ShowDistance,
@@ -394,6 +394,20 @@ VisualGeneral:AddToggle("Remove_Fog", {
 	end,
 })
 
+--[[
+ESP:NewBar({
+	Name = "Health",
+	Side = "Left",
+	Width = 2,
+	LerpColor = true,
+	GetValue = function(char, player)
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		return hum and hum.Health or 0, hum and hum.MaxHealth or 100
+	end,
+})
+]]
+
+-- ============ 1. Track players ============
 local function trackPlayer(player)
 	if player ~= Players.LocalPlayer then
 		ESP.Track(player, "Player")
@@ -409,6 +423,7 @@ Players.PlayerRemoving:Connect(function(player)
 	ESP.Untrack(player)
 end)
 
+-- ============ 4. Register bars ============
 ESP.NewBar({
 	Name = "Health",
 	Side = "Left",
@@ -423,6 +438,14 @@ ESP.NewBar({
 		return instance:GetAttribute("Health") or 0, instance:GetAttribute("MaxHealth") or 100
 	end,
 })
+
+-- ============ 5. Cleanup ============
+-- Example: hook into a UI button, or call ESP:Unload() manually.
+-- game:GetService("UserInputService").InputBegan:Connect(function(input)
+--     if input.KeyCode == Enum.KeyCode.Delete then
+--         ESP:Unload()
+--     end
+-- end)
 
 -------------------------------- UI Settings Tab & Watermark --------------------------------
 Library:SetWatermarkVisibility(true)
@@ -449,6 +472,7 @@ end))
 
 Library.KeybindFrame.Visible = true
 
+-- Unload handler: clean up connections and Drawing objects
 Library:OnUnload(function()
 	Library.Unloaded = true
 	disconnectConnections()

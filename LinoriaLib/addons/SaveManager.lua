@@ -45,9 +45,25 @@ do
 				}
 			end,
 			Load = function(idx, data)
-				if Options[idx] then
-					Options[idx]:SetValueRGB(Color3.fromHex(data.value), data.transparency)
+				if not Options[idx] then
+					return
 				end
+
+				local hex = data.value
+				if type(hex) ~= "string" then
+					return
+				end
+
+				if hex:sub(1, 1) ~= "#" then
+					hex = "#" .. hex
+				end
+
+				local ok, color = pcall(Color3.fromHex, hex)
+				if not ok or typeof(color) ~= "Color3" then
+					color = Color3.new(1, 1, 1)
+				end
+
+				Options[idx]:SetValueRGB(color, data.transparency)
 			end,
 		},
 		KeyPicker = {
