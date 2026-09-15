@@ -164,6 +164,32 @@ local function unwatchFolder(folder)
 	end
 end
 
+local function watchFolderPredicate(folder, groupName, predicate)
+	if not folder then
+		return
+	end
+	if watchedFolders[folder] then
+		return
+	end
+
+	local function tryTrack(m)
+		if not predicate or predicate(m) then
+			ESP.Track(m, groupName)
+		end
+	end
+
+	for _, m in ipairs(folder:GetChildren()) do
+		tryTrack(m)
+	end
+
+	watchedFolders[folder] = {
+		added = folder.ChildAdded:Connect(tryTrack),
+		removed = folder.ChildRemoved:Connect(function(m)
+			ESP.Untrack(m)
+		end),
+	}
+end
+
 -- watchFolder(Workspace:FindFirstChild("NPCs"))  -- add more folders as needed
 
 -------------------------------- Main Tab --------------------------------
@@ -202,8 +228,10 @@ General:AddToggle("Speed", {
 				end)
 			end)
 		else
-			SpeedConnection:Disconnect()
-			SpeedConnection = nil
+			if SpeedConnection then
+				SpeedConnection:Disconnect()
+				SpeedConnection = nil
+			end
 		end
 	end,
 }):AddKeyPicker("Speed_Toggle", {
@@ -577,13 +605,17 @@ TempStorageVisualTabBoxMain:AddToggle("ESP_ShowDistance", {
 	end,
 })
 
+local function isMob(m)
+	return m:IsA("Model") and Players:GetPlayerFromCharacter(m) == nil
+end
+
 TempStorageVisualTabBoxMain:AddToggle("Mob_ESP", {
 	Text = "Mob Esp",
 	Default = false,
 	Callback = function(Value)
-		local folder = workspace:FindFirstChild("Monsters")
+		local folder = workspace:FindFirstChild("Live") -- <-- change me
 		if Value then
-			watchFolder(folder, "Monster")
+			watchFolderPredicate(folder, "Monster", isMob)
 		else
 			unwatchFolder(folder)
 		end
@@ -652,14 +684,14 @@ VisualMods:AddToggle("Remove_Fog", {
 	Callback = function(Value)
 		if Value then
 			RemoveFogConnection = RunService.RenderStepped:Connect(function()
-				game.Lighting.Atmosphere.Density = 0
+				Lighting.Atmosphere.Density = 0
 			end)
 		else
 			if RemoveFogConnection then
 				RemoveFogConnection:Disconnect()
 			end
 
-			game.Lighting.Atmosphere.Density = Original_Density
+			Lighting.Atmosphere.Density = Original_Density
 		end
 	end,
 })
@@ -697,7 +729,7 @@ VisualMods:AddSlider("MaxZoom_Slider", {
 	Text = "Max Zoom",
 	Default = MaxZoomDefault,
 	Min = 10,
-	Max = 1000,
+	Max = 400, --YOU GET BANNED IF YOU GO TOO HIGH
 	Rounding = 0,
 	Compact = false,
 
@@ -824,6 +856,7 @@ MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", {
 })
 -- Library:Notify("hello")
 Library.ToggleKeybind = Options.MenuKeybind
+SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
 SaveManager:IgnoreThemeSettings()

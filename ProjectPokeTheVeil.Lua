@@ -223,14 +223,16 @@ General:AddToggle("Noclip", {
 			local Noclipping = nil
 
 			pcall(function()
-				Noclipping:Disconnect()
+				if Noclipping then
+					Noclipping:Disconnect()
+				end
 			end)
 
 			Clip = false
 			NoclipParts = {}
 			Noclipping = RunService.Stepped:Connect(function()
 				if Clip == false and player.Character ~= nil then
-					for _, child in pairs(player.Character:GetDescendants()) do
+					for _, child in pairs(player.Character:GetChildren()) do
 						if child:IsA("BasePart") and child.CanCollide == true then
 							child.CanCollide = false
 							NoclipParts[child] = true
@@ -240,7 +242,9 @@ General:AddToggle("Noclip", {
 			end)
 		else
 			pcall(function()
-				Noclipping:Disconnect()
+				if Noclipping then
+					Noclipping:Disconnect()
+				end
 			end)
 
 			Clip = true

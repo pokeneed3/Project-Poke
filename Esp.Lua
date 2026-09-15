@@ -414,9 +414,15 @@ local function isValidCharacter(target)
 	end
 
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
-	local root = model:FindFirstChild("HumanoidRootPart")
-		or model.PrimaryPart
-		or model:FindFirstChildWhichIsA("BasePart")
+	local root = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+
+	if not root then
+		-- Only accept a loose BasePart fallback for non-Humanoid models
+		if humanoid then
+			return nil
+		end
+		root = model:FindFirstChildWhichIsA("BasePart")
+	end
 
 	if root and (not humanoid or humanoid.Health > 0) then
 		return model, root, humanoid
@@ -425,13 +431,13 @@ local function isValidCharacter(target)
 end
 
 -- Get world-space corners of the model's bounding box.
--- Returns: min, max, size (Vector3s) or nil if it can't be computed.
+-- Returns: cf, size (Vector3s) or nil if it can't be computed.
 local function getWorldBoundingBox(model)
 	local ok, cf, size = pcall(function()
 		return model:GetBoundingBox()
 	end)
 
-	if ok and cf and size then
+	if ok and cf and size and size.Magnitude >= 1 then
 		return cf, size
 	end
 
@@ -443,14 +449,14 @@ local function getWorldBoundingBox(model)
 	local ok2, size2 = pcall(function()
 		return model:GetExtentsSize()
 	end)
-	if not ok2 then
+	if not ok2 or not size2 or size2.Magnitude < 1 then
 		return nil
 	end
 	return primary.CFrame, size2
 end
 
 -- Project the 8 corners of an oriented box into screen space.
--- Returns: minX, minY, maxX, maxY, allOnScreen
+-- Returns: minX, minY, maxX, maxY or nil if the box is unusable.
 local function projectBox(cf, size)
 	local half = size * 0.5
 	local corners = {
@@ -469,27 +475,43 @@ local function projectBox(cf, size)
 	local anyFront = false
 
 	for _, worldPos in ipairs(corners) do
-		local sp, onScreen = Camera:WorldToViewportPoint(worldPos)
+		local sp = Camera:WorldToViewportPoint(worldPos)
 		if sp.Z > 0 then
 			anyFront = true
-			if sp.X < minX then
-				minX = sp.X
-			end
-			if sp.Y < minY then
-				minY = sp.Y
-			end
-			if sp.X > maxX then
-				maxX = sp.X
-			end
-			if sp.Y > maxY then
-				maxY = sp.Y
-			end
+			minX = math.min(minX, sp.X)
+			minY = math.min(minY, sp.Y)
+			maxX = math.max(maxX, sp.X)
+			maxY = math.max(maxY, sp.Y)
 		end
 	end
 
 	if not anyFront then
 		return nil
 	end
+
+	local w = maxX - minX
+	local h = maxY - minY
+
+	-- Reject degenerate (all corners collapsed) projections
+	if w < 1 or h < 1 then
+		return nil
+	end
+
+	-- Reject exploded projections (camera inside/near the box).
+	-- A normal on-screen character is nowhere near this big.
+	if w > 4000 or h > 4000 then
+		return nil
+	end
+
+	-- Clamp to a reasonable range around the viewport so a single
+	-- far-off corner can't stretch the box weirdly.
+	local vp = Camera.ViewportSize
+	local margin = 2000
+	minX = math.clamp(minX, -margin, vp.X + margin)
+	maxX = math.clamp(maxX, -margin, vp.X + margin)
+	minY = math.clamp(minY, -margin, vp.Y + margin)
+	maxY = math.clamp(maxY, -margin, vp.Y + margin)
+
 	return minX, minY, maxX, maxY
 end
 
@@ -623,6 +645,12 @@ local function updateTarget(instance, drawings)
 		return
 	end
 
+	-- Too close: projection is unreliable and causes giant bars
+	if distance < 4 then
+		hideESP(drawings)
+		return
+	end
+
 	-- Team check (per-group)
 	local isTeammate = getSetting(group, "TeamCheck")
 		and LocalPlayer.Team ~= nil
@@ -681,6 +709,11 @@ local function updateTarget(instance, drawings)
 		local bottomOffset = 4
 		local barSpacing = 2
 
+		-- Clamp the box height/width used for bar sizing so distance
+		-- doesn't smush bars into 0 or blow them up.
+		local barBoxHeight = math.clamp(height, 8, 500)
+		local barBoxWidth = math.clamp(width, 8, 500)
+
 		for _, barDef in ipairs(CustomBars) do
 			local barDrawings = drawings.Bars[barDef.Name]
 			if barDrawings then
@@ -694,19 +727,19 @@ local function updateTarget(instance, drawings)
 					rightOffset = rightOffset + barWidth + barSpacing + 2
 
 					barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
-					barDrawings.Outline.Size = Vector2.new(barWidth + 2, height + 2)
+					barDrawings.Outline.Size = Vector2.new(barWidth + 2, barBoxHeight + 2)
 
-					local barHeight = math.floor(height * ratio)
-					barDrawings.Fill.Position = Vector2.new(barX, boxY + (height - barHeight))
+					local barHeight = math.clamp(math.floor(barBoxHeight * ratio), 0, barBoxHeight)
+					barDrawings.Fill.Position = Vector2.new(barX, boxY + (barBoxHeight - barHeight))
 					barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
 				elseif barDef.Side == "Bottom" then
 					local barY = boxY + height + bottomOffset
 					bottomOffset = bottomOffset + barWidth + barSpacing + 2
 
 					barDrawings.Outline.Position = Vector2.new(boxX - 1, barY - 1)
-					barDrawings.Outline.Size = Vector2.new(width + 2, barWidth + 2)
+					barDrawings.Outline.Size = Vector2.new(barBoxWidth + 2, barWidth + 2)
 
-					local fillWidth = math.floor(width * ratio)
+					local fillWidth = math.clamp(math.floor(barBoxWidth * ratio), 0, barBoxWidth)
 					barDrawings.Fill.Position = Vector2.new(boxX, barY)
 					barDrawings.Fill.Size = Vector2.new(fillWidth, barWidth)
 				else -- "Left"
@@ -715,10 +748,10 @@ local function updateTarget(instance, drawings)
 					leftOffset = leftOffset + barSpacing + 2
 
 					barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
-					barDrawings.Outline.Size = Vector2.new(barWidth + 2, height + 2)
+					barDrawings.Outline.Size = Vector2.new(barWidth + 2, barBoxHeight + 2)
 
-					local barHeight = math.floor(height * ratio)
-					barDrawings.Fill.Position = Vector2.new(barX, boxY + (height - barHeight))
+					local barHeight = math.clamp(math.floor(barBoxHeight * ratio), 0, barBoxHeight)
+					barDrawings.Fill.Position = Vector2.new(barX, boxY + (barBoxHeight - barHeight))
 					barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
 				end
 
