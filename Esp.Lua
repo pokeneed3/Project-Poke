@@ -19,6 +19,7 @@ local ESPConfig = {
 	BoxStyle = "Square", -- "Square" | "Corners" | "Filled" | "3D"
 	BoxThickness = 1,
 	BoxTransparency = 1,
+	FixedBoxSize = Vector2.new(40, 80), -- width, height in pixels (constant at any distance)
 	CornerLength = 0.25, -- fraction of box side, for "Corners"
 	MaxDistance = math.huge, -- studs; hide beyond this
 	TeamCheck = false,
@@ -504,45 +505,19 @@ end
 -- Box drawing
 -- ============================================================
 
--- Project the model's bounding box into a stable screen-space rectangle.
--- Both width and height are derived from a single distance measurement,
--- so the box scales uniformly with zoom and never squishes or distorts.
--- Returns: minX, minY, maxX, maxY, or nil if the model isn't visible.
 local function projectBox(cf, size, group)
 	local center = cf.Position
+	local centerScreen = Camera:WorldToViewportPoint(center)
 
-	-- Project the center only
-	local centerScreen, onScreen = Camera:WorldToViewportPoint(center)
 	if centerScreen.Z <= 0 then
 		return nil
 	end
 
-	-- Distance from camera to the model's center (in studs)
-	local distance = (Camera.CFrame.Position - center).Magnitude
-	if distance < 0.01 then
-		return nil
-	end
+	-- Fixed pixel size (per-group override supported via getSetting)
+	local fixed = getSetting(group, "FixedBoxSize") or Vector2.new(40, 80)
+	local screenWidth = fixed.X
+	local screenHeight = fixed.Y
 
-	-- Viewport height and camera FOV determine the pixel-per-stud scale
-	-- at this distance. Using a single distance means width and height
-	-- scale together uniformly.
-	local viewport = Camera.ViewportSize
-	local fovRad = math.rad(Camera.FieldOfView)
-	-- Height of the view frustum at `distance` from the camera
-	local worldHeightAtDistance = 2 * distance * math.tan(fovRad * 0.5)
-	-- Pixels per stud at this depth
-	local pixelsPerStud = viewport.Y / worldHeightAtDistance
-
-	-- Screen-space size from the model's world-space dimensions
-	local screenHeight = size.Y * pixelsPerStud
-	local screenWidth = size.X * pixelsPerStud -- use actual model width, not aspect
-
-	-- Optional: enforce a minimum so tiny/distant boxes stay clickable
-	local minSize = 8
-	screenHeight = math.max(screenHeight, minSize)
-	screenWidth = math.max(screenWidth, minSize)
-
-	-- Build the box around the projected center
 	local minX = centerScreen.X - screenWidth * 0.5
 	local maxX = centerScreen.X + screenWidth * 0.5
 	local minY = centerScreen.Y - screenHeight * 0.5
