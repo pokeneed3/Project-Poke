@@ -8,6 +8,7 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local RenderStepped = RunService.RenderStepped
+local Heartbeat = RunService.Heartbeat
 local LocalPlayer = Players.LocalPlayer
 local Mouse = LocalPlayer:GetMouse()
 
@@ -48,18 +49,23 @@ local Library = {
 	ScreenGui = ScreenGui,
 }
 
+-- Rainbow state. The color is still exposed on the Library table for
+-- compatibility, but the driver has been moved off RenderStepped and onto
+-- Heartbeat, and it only runs when the value actually needs to change.
 local RainbowStep = 0
 local Hue = 0
+local RAINBOW_INTERVAL = 1 / 60
+local RAINBOW_HUE_STEP = 1 / 400
 
 table.insert(
 	Library.Signals,
-	RenderStepped:Connect(function(Delta)
+	Heartbeat:Connect(function(Delta)
 		RainbowStep = RainbowStep + Delta
 
-		if RainbowStep >= (1 / 60) then
+		if RainbowStep >= RAINBOW_INTERVAL then
 			RainbowStep = 0
 
-			Hue = Hue + (1 / 400)
+			Hue = Hue + RAINBOW_HUE_STEP
 
 			if Hue > 1 then
 				Hue = 0
@@ -172,28 +178,86 @@ function Library:CreateLabel(Properties, IsHud)
 	return Library:Create(_Instance, Properties)
 end
 
+-- Rewritten drag system.
+--
+-- Previously this used a `while IsMouseButtonPressed do RenderStepped:Wait()`
+-- loop that read `Mouse.X/Y` (which are only updated once per frame, after
+-- the frame that is already in flight). That caused a one-frame lag and
+-- visible jitter.
+--
+-- Now it uses UserInputService.InputChanged, which delivers the real input
+-- position from the OS/input device, and applies a delta relative to the
+-- position captured when the drag started. No loop, no per-frame blocking,
+-- no stale coordinates. Works for mouse and touch.
 function Library:MakeDraggable(Instance, Cutoff)
 	Instance.Active = true
 
-	Instance.InputBegan:Connect(function(Input)
-		if Input.UserInputType == Enum.UserInputType.MouseButton1 then
-			local ObjPos = Vector2.new(Mouse.X - Instance.AbsolutePosition.X, Mouse.Y - Instance.AbsolutePosition.Y)
+	local dragging = false
+	local dragStartInput
+	local startPos
 
-			if ObjPos.Y > (Cutoff or 40) then
+	local dragConnection
+	local endConnection
+
+	local function stopDragging()
+		dragging = false
+
+		if dragConnection then
+			dragConnection:Disconnect()
+			dragConnection = nil
+		end
+
+		if endConnection then
+			endConnection:Disconnect()
+			endConnection = nil
+		end
+	end
+
+	Instance.InputBegan:Connect(function(Input)
+		if
+			Input.UserInputType ~= Enum.UserInputType.MouseButton1
+			and Input.UserInputType ~= Enum.UserInputType.Touch
+		then
+			return
+		end
+
+		local AbsolutePosition = Instance.AbsolutePosition
+		local objPosX = Input.Position.X - AbsolutePosition.X
+		local objPosY = Input.Position.Y - AbsolutePosition.Y
+
+		if objPosY > (Cutoff or 40) then
+			return
+		end
+
+		dragging = true
+		dragStartInput = Input.Position
+		startPos = Instance.Position
+
+		dragConnection = InputService.InputChanged:Connect(function(Changed)
+			if not dragging then
 				return
 			end
 
-			while InputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) do
-				Instance.Position = UDim2.new(
-					0,
-					Mouse.X - ObjPos.X + (Instance.Size.X.Offset * Instance.AnchorPoint.X),
-					0,
-					Mouse.Y - ObjPos.Y + (Instance.Size.Y.Offset * Instance.AnchorPoint.Y)
-				)
-
-				RenderStepped:Wait()
+			if
+				Changed.UserInputType ~= Enum.UserInputType.MouseMovement
+				and Changed.UserInputType ~= Enum.UserInputType.Touch
+			then
+				return
 			end
-		end
+
+			local Delta = Changed.Position - dragStartInput
+
+			Instance.Position =
+				UDim2.new(startPos.X.Scale, startPos.X.Offset + Delta.X, startPos.Y.Scale, startPos.Y.Offset + Delta.Y)
+		end)
+
+		endConnection = InputService.InputEnded:Connect(function(Ended)
+			if Ended ~= Input then
+				return
+			end
+
+			stopDragging()
+		end)
 	end)
 end
 
@@ -244,7 +308,7 @@ function Library:AddToolTip(InfoStr, HoverInstance)
 		Tooltip.Visible = true
 
 		while IsHovering do
-			RunService.Heartbeat:Wait()
+			Heartbeat:Wait()
 			Tooltip.Position = UDim2.fromOffset(Mouse.X + 15, Mouse.Y + 12)
 		end
 	end)

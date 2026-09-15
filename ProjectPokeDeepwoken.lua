@@ -1,6 +1,7 @@
 -- Services
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
+local ReplicatedStorage = cloneref(game:GetService("ReplicatedStorage"))
 local Stats = game:GetService("Stats")
 local UserInputService = cloneref(game:GetService("UserInputService"))
 
@@ -154,13 +155,15 @@ local function unwatchFolder(folder)
 	end
 end
 
+-- watchFolder(Workspace:FindFirstChild("NPCs"))  -- add more folders as needed
+
 -------------------------------- Main Tab --------------------------------
 local TabBox = Tabs.Main:AddLeftTabbox()
 local General = TabBox:AddTab("General")
 local MainSettings = TabBox:AddTab("Settings")
 
 local SpeedConnection
-local Speed = 20
+local Speed = 100
 
 General:AddToggle("Speed", {
 	Text = "Speed",
@@ -169,9 +172,18 @@ General:AddToggle("Speed", {
 		if Value then
 			task.spawn(function()
 				SpeedConnection = RunService.Heartbeat:Connect(function()
-					local player = game:GetService("Players").LocalPlayer
-					local humanoid = player.Character:FindFirstChild("Humanoid")
-					local root = player.Character:FindFirstChild("HumanoidRootPart")
+					local player = Players.LocalPlayer
+					local character = player.Character
+					if not character then
+						return
+					end
+
+					local humanoid = character:FindFirstChildOfClass("Humanoid")
+					local root = character:FindFirstChild("HumanoidRootPart")
+					if not humanoid or not root or humanoid.Health <= 0 then
+						return
+					end
+
 					local dir = humanoid.MoveDirection
 					if dir.Magnitude > 0 then
 						local speed = humanoid.WalkSpeed + Speed
@@ -181,9 +193,8 @@ General:AddToggle("Speed", {
 				end)
 			end)
 		else
-			if SpeedConnection then
-				SpeedConnection:Disconnect()
-			end
+			SpeedConnection:Disconnect()
+			SpeedConnection = nil
 		end
 	end,
 }):AddKeyPicker("Speed_Toggle", {
@@ -198,7 +209,7 @@ MainSettings:AddSlider("SpeedSlider", {
 	Text = "Speed",
 	Default = Speed,
 	Min = 1,
-	Max = 1000,
+	Max = 250,
 	Rounding = 0,
 	Compact = false,
 
@@ -207,7 +218,8 @@ MainSettings:AddSlider("SpeedSlider", {
 	end,
 })
 
--- hook the client side anti noclip
+--
+local NoclipCFrameBlock = false
 
 local mt = getrawmetatable(game)
 local oldNewIndex = mt.__newindex
@@ -215,7 +227,8 @@ setreadonly(mt, false)
 
 mt.__newindex = newcclosure(function(self, key, value)
 	if
-		key == "CFrame"
+		NoclipCFrameBlock
+		and key == "CFrame"
 		and self.Name == "HumanoidRootPart"
 		and self:IsDescendantOf(game.Players.LocalPlayer.Character)
 	then
@@ -226,9 +239,54 @@ end)
 
 setreadonly(mt, true)
 
-local NoclipParts = {}
-local Noclipping = nil
-local Clip
+local NoclipParts = {} -- set of parts we've disabled
+local Noclipping = nil -- Stepped connection
+local CharConnections = {} -- connections tied to the current character
+local Clip = true
+
+local player = game:GetService("Players").LocalPlayer
+
+-- Disable collision on a single part and remember it
+local function stripPart(part)
+	if part:IsA("BasePart") and part.CanCollide then
+		part.CanCollide = false
+		NoclipParts[part] = true
+	end
+end
+
+-- Handle all current + future parts of a character
+local function hookCharacter(character)
+	-- Clean up old connections
+	for _, c in ipairs(CharConnections) do
+		c:Disconnect()
+	end
+	table.clear(CharConnections)
+
+	-- Initial pass (once, not per-frame)
+	for _, d in ipairs(character:GetDescendants()) do
+		stripPart(d)
+	end
+
+	-- Handle parts added later (accessories, tools, etc.)
+	table.insert(
+		CharConnections,
+		character.DescendantAdded:Connect(function(d)
+			if not Clip then
+				stripPart(d)
+			end
+		end)
+	)
+end
+
+-- Re-hook on respawn
+table.insert(
+	CharConnections,
+	player.CharacterAdded:Connect(function(char)
+		if not Clip then
+			hookCharacter(char)
+		end
+	end)
+)
 
 General:AddToggle("Noclip", {
 	Text = "Noclip",
@@ -236,8 +294,8 @@ General:AddToggle("Noclip", {
 	Callback = function(Value)
 		if Value then
 			local player = game:GetService("Players").LocalPlayer
-			local NoclipParts = {}
-			local Noclipping = nil
+
+			NoclipCFrameBlock = true
 
 			pcall(function()
 				Noclipping:Disconnect()
@@ -247,7 +305,7 @@ General:AddToggle("Noclip", {
 			NoclipParts = {}
 			Noclipping = RunService.Stepped:Connect(function()
 				if Clip == false and player.Character ~= nil then
-					for _, child in pairs(player.Character:GetDescendants()) do
+					for _, child in pairs(player.Character:GetChildren()) do
 						if child:IsA("BasePart") and child.CanCollide == true then
 							child.CanCollide = false
 							NoclipParts[child] = true
@@ -256,6 +314,7 @@ General:AddToggle("Noclip", {
 				end
 			end)
 		else
+			NoclipCFrameBlock = false
 			pcall(function()
 				Noclipping:Disconnect()
 			end)
@@ -288,7 +347,6 @@ General:AddToggle("InfiniteJump_Toggle", {
 		if Value then
 			local LP = Players.LocalPlayer
 
-			-- Track held state
 			local inputBegan = UserInputService.InputBegan:Connect(function(input, gpe)
 				if gpe then
 					return
@@ -304,8 +362,7 @@ General:AddToggle("InfiniteJump_Toggle", {
 				end
 			end)
 
-			-- Apply continuously
-			JumpConnection = RunService.RenderStepped:Connect(function()
+			local renderStepped = RunService.RenderStepped:Connect(function()
 				if not HoldingJump then
 					return
 				end
@@ -324,11 +381,11 @@ General:AddToggle("InfiniteJump_Toggle", {
 				root.AssemblyLinearVelocity = Vector3.new(v.X, power, v.Z)
 			end)
 
-			-- Cleanup hooks
 			JumpConnection = {
 				Disconnect = function()
 					inputBegan:Disconnect()
 					inputEnded:Disconnect()
+					renderStepped:Disconnect()
 					HoldingJump = false
 				end,
 			}
@@ -349,7 +406,7 @@ General:AddToggle("InfiniteJump_Toggle", {
 })
 
 MainSettings:AddSlider("InfJumpSlider", {
-	Text = "JumpPower",
+	Text = "Jump Power",
 	Default = InfJumpPowerValue,
 	Min = InfJumpPowerValue,
 	Max = 500,
@@ -358,6 +415,45 @@ MainSettings:AddSlider("InfJumpSlider", {
 
 	Callback = function(Value)
 		InfJumpPowerValue = Value
+	end,
+})
+
+local NoFallDmgEnabled = false
+
+General:AddToggle("NoFallDmg_Toggle", {
+	Text = "No Fall Damage",
+	Default = false,
+	Callback = function(Value)
+		if Value then
+			local WorldClient = game.Players.LocalPlayer.PlayerGui:FindFirstChild("WorldClient")
+			local env = getsenv(WorldClient)
+
+			local fallName, originalFall
+			for name, value in pairs(env) do
+				if type(value) == "function" and name:lower():find("fall") then
+					fallName, originalFall = name, value
+					break
+				end
+			end
+
+			if not originalFall then
+				warn("Could not find fall function")
+				return
+			end
+
+			print("Hooking:", fallName)
+
+			NoFallDmgEnabled = true
+
+			env[fallName] = function(...)
+				if NoFallDmgEnabled then
+					return
+				end
+				return originalFall(...)
+			end
+		else
+			NoFallDmgEnabled = false
+		end
 	end,
 })
 
@@ -429,42 +525,6 @@ for _, groupName in ipairs({ "Player", "Monster", "NPC", "Drop", "Chest" }) do
 	end
 end
 
-local chatwindow = game:GetService("TextChatService").ChatWindowConfiguration
-
-VisualMods:AddToggle("Chat_History", {
-	Text = "Show Chat Window",
-	Default = false,
-	Callback = function(Value)
-		if Value then
-			chatwindow.Enabled = true
-		else
-			chatwindow.Enabled = false
-		end
-	end,
-})
-
-local Original_Density = 0.7
-local RemoveFogConnection
-
-VisualMods:AddToggle("Remove_Fog", {
-	Text = "No Fog",
-	Default = false,
-
-	Callback = function(Value)
-		if Value then
-			RemoveFogConnection = RunService.RenderStepped:Connect(function()
-				game.Lighting.Atmosphere.Density = 0
-			end)
-		else
-			if RemoveFogConnection then
-				RemoveFogConnection:Disconnect()
-			end
-
-			game.Lighting.Atmosphere.Density = Original_Density
-		end
-	end,
-})
-
 -- Master ESP Toggle with Box Colorpicker attached
 TempStorageVisualTabBoxMain:AddToggle("ESP_Enabled", {
 	Text = "Enable ESP",
@@ -478,7 +538,7 @@ TempStorageVisualTabBoxMain:AddToggle("ESP_Enabled", {
 -- Name Toggle with Text Colorpicker attached
 TempStorageVisualTabBoxMain:AddToggle("ESP_ShowName", {
 	Text = "Show Name",
-	Default = ESPConfig.ShowName or true,
+	Default = ESPConfig.ShowName == nil and true or ESPConfig.ShowName,
 	Callback = function(Value)
 		ESPConfig.ShowName = Value
 	end,
@@ -496,7 +556,7 @@ TempStorageVisualTabBoxMain:AddToggle("ESP_DisplayName", {
 -- Health % Toggle
 TempStorageVisualTabBoxMain:AddToggle("ESP_ShowHealth", {
 	Text = "Show Health %",
-	Default = ESPConfig.ShowHealth or true,
+	Default = ESPConfig.ShowHealth == nil and true or ESPConfig.ShowHealth,
 	Callback = function(Value)
 		ESPConfig.ShowHealth = Value
 	end,
@@ -515,7 +575,7 @@ TempStorageVisualTabBoxMain:AddToggle("Mob_ESP", {
 	Text = "Mob Esp",
 	Default = false,
 	Callback = function(Value)
-		local folder = workspace:FindFirstChild("Live")
+		local folder = workspace:FindFirstChild("Monsters")
 		if Value then
 			watchFolder(folder, "Monster")
 		else
@@ -555,12 +615,61 @@ TempStorageVisualTabBoxMain:AddToggle("Chest_ESP", {
 	Default = false,
 	Callback = function(Value)
 		if Value then
-			watchInstanceName("Model", "Thrown")
+			watchInstanceName("Chest", "Chest")
 		else
-			unwatchInstanceName("Model")
+			unwatchInstanceName("Chest")
 		end
 	end,
 })
+
+local chatwindow = game:GetService("TextChatService").ChatWindowConfiguration
+
+VisualMods:AddToggle("Chat_History", {
+	Text = "Show Chat Window",
+	Default = false,
+	Callback = function(Value)
+		if Value then
+			chatwindow.Enabled = true
+		else
+			chatwindow.Enabled = false
+		end
+	end,
+})
+
+local Original_Density = 0.7
+local RemoveFogConnection
+
+VisualMods:AddToggle("Remove_Fog", {
+	Text = "No Fog",
+	Default = false,
+
+	Callback = function(Value)
+		if Value then
+			RemoveFogConnection = RunService.RenderStepped:Connect(function()
+				game.Lighting.Atmosphere.Density = 0
+			end)
+		else
+			if RemoveFogConnection then
+				RemoveFogConnection:Disconnect()
+			end
+
+			game.Lighting.Atmosphere.Density = Original_Density
+		end
+	end,
+})
+
+--[[
+ESP:NewBar({
+	Name = "Health",
+	Side = "Left",
+	Width = 2,
+	LerpColor = true,
+	GetValue = function(char, player)
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		return hum and hum.Health or 0, hum and hum.MaxHealth or 100
+	end,
+})
+]]
 
 -- ============ 1. Track players ============
 local function trackPlayer(player)
@@ -574,18 +683,20 @@ for _, p in ipairs(Players:GetPlayers()) do
 end
 
 Players.PlayerAdded:Connect(function(player)
-	trackPlayer()
+	trackPlayer(player)
 
 	local groupId = 36025827
+	local ok, roleName = pcall(function()
+		return player:GetRoleInGroup(groupId)
+	end)
 
-	local roleName = player:GetRoleInGroup(groupId)
-
-	if roleName == "Owner" or roleName == "Admin" or roleName == "money tester" or roleName == "Tester" then
-		Library:Notify(`Mod in game {roleName}`)
+	if
+		ok
+		and roleName
+		and (roleName == "Owner" or roleName == "Admin" or roleName == "money tester" or roleName == "Tester")
+	then
+		Library:Notify(("Mod in game: %s"):format(roleName), 5)
 	end
-end)
-Players.PlayerRemoving:Connect(function(player)
-	ESP.Untrack(player)
 end)
 
 -- ============ 4. Register bars ============
@@ -637,12 +748,13 @@ end))
 
 Library.KeybindFrame.Visible = true
 
--- Unload handler: clean up connections and Drawing objects
 Library:OnUnload(function()
 	Library.Unloaded = true
 	disconnectConnections()
 	if ESP and ESP.Unload then
-		ESP.Unload()
+		pcall(function()
+			ESP.Unload()
+		end)
 	end
 end)
 
@@ -667,7 +779,7 @@ ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
 SaveManager:IgnoreThemeSettings()
 ThemeManager:SetFolder("Project Poke")
-SaveManager:SetFolder("Project Poke/Deepwoken")
+SaveManager:SetFolder("Project Poke/TheVeil")
 SaveManager:BuildConfigSection(Tabs["UI Settings"])
 ThemeManager:ApplyToTab(Tabs["UI Settings"])
 SaveManager:LoadAutoloadConfig()
