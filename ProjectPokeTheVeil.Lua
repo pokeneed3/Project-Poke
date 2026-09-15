@@ -171,7 +171,6 @@ General:AddToggle("Speed", {
 			task.spawn(function()
 				SpeedConnection = RunService.Heartbeat:Connect(function()
 					local player = game:GetService("Players").LocalPlayer
-
 					local humanoid = player.Character:FindFirstChild("Humanoid")
 					local root = player.Character:FindFirstChild("HumanoidRootPart")
 					local dir = humanoid.MoveDirection
@@ -219,37 +218,44 @@ local GroupSettings = VisualSettings
 local function addGroupToggle(groupName, key, label)
 	local config = ESPGroups[groupName]
 	local optionName = "ESP_" .. groupName .. "_" .. key
+
 	local defaultValue = config[key]
-	local colorKey
-	local defaultColor = Color3.new(1, 1, 1)
-
 	if defaultValue == nil then
-		defaultValue = ESPConfig[key]
+		defaultValue = false
 	end
+	config[key] = defaultValue
 
+	-- Map which keys get a color picker, and to which config key
+	local colorKey
 	if key == "ShowBox" then
 		colorKey = "BoxColor"
 	elseif key == "ShowHealth" then
 		colorKey = "BarColor"
-	else
+	elseif key == "ShowName" then
 		colorKey = "TextColor"
+		-- key == "ShowDistance" → no colorKey, no picker
 	end
 
-	defaultColor = config[colorKey] or ESPConfig[colorKey] or defaultColor
-
-	GroupSettings:AddToggle(optionName, {
+	local toggle = GroupSettings:AddToggle(optionName, {
 		Text = groupName .. " - " .. label,
 		Default = defaultValue,
 		Callback = function(value)
 			config[key] = value
 		end,
-	}):AddColorPicker(`{optionName}_Color`, {
-		Default = defaultColor,
-		Title = "Color",
-		Callback = function(Value)
-			config[colorKey] = Value
-		end,
 	})
+
+	if colorKey then
+		local defaultColor = config[colorKey] or ESPConfig[colorKey] or Color3.new(1, 1, 1)
+		config[colorKey] = defaultColor
+
+		toggle:AddColorPicker(optionName .. "_Color", {
+			Default = defaultColor,
+			Title = "Color",
+			Callback = function(Value)
+				config[colorKey] = Value
+			end,
+		})
+	end
 end
 
 for _, groupName in ipairs({ "Player", "Monster", "NPC", "Drop", "Chest" }) do
@@ -271,12 +277,6 @@ VisualGeneral:AddToggle("ESP_Enabled", {
 	Callback = function(Value)
 		ESPConfig.Enabled = Value
 	end,
-}):AddColorPicker("ESP_BoxColor", {
-	Default = ESPConfig.BoxColor,
-	Title = "Box Color",
-	Callback = function(Value)
-		ESPConfig.BoxColor = Value
-	end,
 })
 
 -- Name Toggle with Text Colorpicker attached
@@ -285,12 +285,6 @@ VisualGeneral:AddToggle("ESP_ShowName", {
 	Default = ESPConfig.ShowName or true,
 	Callback = function(Value)
 		ESPConfig.ShowName = Value
-	end,
-}):AddColorPicker("ESP_TextColor", {
-	Default = ESPConfig.TextColor,
-	Title = "Text Color",
-	Callback = function(Value)
-		ESPConfig.TextColor = Value
 	end,
 })
 
@@ -502,7 +496,7 @@ ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
 SaveManager:IgnoreThemeSettings()
 ThemeManager:SetFolder("Project Poke")
-SaveManager:SetFolder("Project Poke/Universal")
+SaveManager:SetFolder("Project Poke/TheVeil")
 SaveManager:BuildConfigSection(Tabs["UI Settings"])
 ThemeManager:ApplyToTab(Tabs["UI Settings"])
 SaveManager:LoadAutoloadConfig()
