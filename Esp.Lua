@@ -687,26 +687,37 @@ local function updateTarget(instance, drawings)
 				local curVal, maxVal = barDef.GetValue(char, instance)
 				maxVal = (maxVal and maxVal > 0) and maxVal or 100
 				local ratio = math.clamp((curVal or 0) / maxVal, 0, 1)
-				local barWidth = barDef.Width or 2
+
+				-- Clamp the bar's visual thickness
+				local barWidth = math.clamp(barDef.Width or 2, barDef.MinWidth or 1, barDef.MaxWidth or 8)
+
+				-- Clamp a length against MinLength / MaxLength.
+				-- The `limit` is the box dimension (height for L/R bars, width for Bottom bars).
+				local function clampLength(len, limit)
+					local maxLen = barDef.MaxLength or limit
+					return math.clamp(len, barDef.MinLength or 0, maxLen)
+				end
 
 				if barDef.Side == "Right" then
 					local barX = boxX + width + rightOffset
 					rightOffset = rightOffset + barWidth + barSpacing + 2
 
+					local outlineHeight = clampLength(height, height)
 					barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
-					barDrawings.Outline.Size = Vector2.new(barWidth + 2, height + 2)
+					barDrawings.Outline.Size = Vector2.new(barWidth + 2, outlineHeight + 2)
 
-					local barHeight = math.floor(height * ratio)
+					local barHeight = clampLength(math.floor(height * ratio), height)
 					barDrawings.Fill.Position = Vector2.new(barX, boxY + (height - barHeight))
 					barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
 				elseif barDef.Side == "Bottom" then
 					local barY = boxY + height + bottomOffset
 					bottomOffset = bottomOffset + barWidth + barSpacing + 2
 
+					local outlineWidth = clampLength(width, width)
 					barDrawings.Outline.Position = Vector2.new(boxX - 1, barY - 1)
-					barDrawings.Outline.Size = Vector2.new(width + 2, barWidth + 2)
+					barDrawings.Outline.Size = Vector2.new(outlineWidth + 2, barWidth + 2)
 
-					local fillWidth = math.floor(width * ratio)
+					local fillWidth = clampLength(math.floor(width * ratio), width)
 					barDrawings.Fill.Position = Vector2.new(boxX, barY)
 					barDrawings.Fill.Size = Vector2.new(fillWidth, barWidth)
 				else -- "Left"
@@ -714,17 +725,16 @@ local function updateTarget(instance, drawings)
 					local barX = boxX - leftOffset
 					leftOffset = leftOffset + barSpacing + 2
 
+					local outlineHeight = clampLength(height, height)
 					barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
-					barDrawings.Outline.Size = Vector2.new(barWidth + 2, height + 2)
+					barDrawings.Outline.Size = Vector2.new(barWidth + 2, outlineHeight + 2)
 
-					local barHeight = math.floor(height * ratio)
+					local barHeight = clampLength(math.floor(height * ratio), height)
 					barDrawings.Fill.Position = Vector2.new(barX, boxY + (height - barHeight))
 					barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
 				end
 
 				-- Color: per-group BarColor > per-bar Color/Lerp > default
-				-- Uses the full fallback chain via getSetting so global BarColor
-				-- and Defaults.BarColor are respected.
 				local groupBarColor = getSetting(group, "BarColor")
 				if groupBarColor then
 					barDrawings.Fill.Color = groupBarColor
@@ -835,6 +845,10 @@ local function NewBar(args)
 		Name = args.Name,
 		Side = args.Side or "Left",
 		Width = args.Width or 2,
+		MinWidth = args.MinWidth or 1,
+		MaxWidth = args.MaxWidth or 8,
+		MinLength = args.MinLength or 0,
+		MaxLength = args.MaxLength, -- nil = use full box dimension
 		Color = args.Color or Color3.fromRGB(0, 255, 0),
 		LerpColor = args.LerpColor or false,
 		GetValue = args.GetValue,
@@ -879,6 +893,16 @@ local function NewBar(args)
 
 	function handle.SetWidth(width)
 		barDef.Width = width
+	end
+
+	function handle.SetWidthClamp(minW, maxW)
+		barDef.MinWidth = minW or barDef.MinWidth
+		barDef.MaxWidth = maxW or barDef.MaxWidth
+	end
+
+	function handle.SetLengthClamp(minL, maxL)
+		barDef.MinLength = minL or barDef.MinLength
+		barDef.MaxLength = maxL
 	end
 
 	function handle.SetGroups(groups)
