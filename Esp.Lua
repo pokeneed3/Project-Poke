@@ -453,7 +453,16 @@ end
 -- Returns: minX, minY, maxX, maxY, allOnScreen
 local function projectBox(cf, size)
 	local half = size * 0.5
-	local corners = {}
+	local corners = {
+		cf * Vector3.new(-half.X, -half.Y, -half.Z),
+		cf * Vector3.new(half.X, -half.Y, -half.Z),
+		cf * Vector3.new(-half.X, half.Y, -half.Z),
+		cf * Vector3.new(half.X, half.Y, -half.Z),
+		cf * Vector3.new(-half.X, -half.Y, half.Z),
+		cf * Vector3.new(half.X, -half.Y, half.Z),
+		cf * Vector3.new(-half.X, half.Y, half.Z),
+		cf * Vector3.new(half.X, half.Y, half.Z),
+	}
 
 	local minX, minY = math.huge, math.huge
 	local maxX, maxY = -math.huge, -math.huge
@@ -463,26 +472,24 @@ local function projectBox(cf, size)
 		local sp, onScreen = Camera:WorldToViewportPoint(worldPos)
 		if sp.Z > 0 then
 			anyFront = true
-			minX = math.min(minX, sp.X)
-			minY = math.min(minY, sp.Y)
-			maxX = math.max(maxX, sp.X)
-			maxY = math.max(maxY, sp.Y)
+			if sp.X < minX then
+				minX = sp.X
+			end
+			if sp.Y < minY then
+				minY = sp.Y
+			end
+			if sp.X > maxX then
+				maxX = sp.X
+			end
+			if sp.Y > maxY then
+				maxY = sp.Y
+			end
 		end
 	end
 
 	if not anyFront then
 		return nil
 	end
-
-	-- Reject degenerate / exploded projections
-	local w, h = maxX - minX, maxY - minY
-	if w < 1 or h < 1 then
-		return nil
-	end
-	if w > 4000 or h > 4000 then
-		return nil
-	end -- sanity cap
-
 	return minX, minY, maxX, maxY
 end
 
