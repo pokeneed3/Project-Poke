@@ -709,10 +709,12 @@ local function updateTarget(instance, drawings)
 		local bottomOffset = 4
 		local barSpacing = 2
 
-		-- Clamp the box height/width used for bar sizing so distance
-		-- doesn't smush bars into 0 or blow them up.
-		local barBoxHeight = math.clamp(height, 8, 500)
-		local barBoxWidth = math.clamp(width, 8, 500)
+		-- Fixed pixel size for bars so they don't scale with distance.
+		-- Bars are anchored to the box but keep a constant on-screen size.
+		local FIXED_BAR_HEIGHT = 40 -- pixels, vertical bars (Left/Right)
+		local FIXED_BAR_WIDTH = 40 -- pixels, horizontal bars (Bottom)
+		local barBoxHeight = FIXED_BAR_HEIGHT
+		local barBoxWidth = FIXED_BAR_WIDTH
 
 		for _, barDef in ipairs(CustomBars) do
 			local barDrawings = drawings.Bars[barDef.Name]
