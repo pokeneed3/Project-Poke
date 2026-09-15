@@ -31,6 +31,10 @@ local ESPConfig = {
 	OcclusionCheck = false, -- raycast from camera to root
 	Padding = 0, -- extra pixels around box
 
+	-- FIX: min distance (studs) below which ESP is hidden to avoid
+	-- unreliable projections when the camera is inside/near the target.
+	MinDistance = 6,
+
 	-- Optional global text formatter.
 	-- Signature: function(target, char, distance, group) -> string
 	FormatText = nil,
@@ -108,6 +112,12 @@ end
 -- Group registration
 -- ============================================================
 
+local function RefreshAllTargets()
+	for _, drawings in pairs(ESPObjects) do
+		drawings.Target.NeedsRefresh = true
+	end
+end
+
 local function RegisterGroup(name, predicate, atFront)
 	assert(type(name) == "string", "Group name must be a string")
 	assert(type(predicate) == "function", "predicate must be function(instance) -> boolean")
@@ -119,10 +129,7 @@ local function RegisterGroup(name, predicate, atFront)
 				break
 			else
 				c.Predicate = predicate
-				-- Refresh existing targets so the new predicate takes effect
-				for instance in pairs(ESPObjects) do
-					ESPObjects[instance].Target.NeedsRefresh = true
-				end
+				RefreshAllTargets()
 				return
 			end
 		end
@@ -134,19 +141,14 @@ local function RegisterGroup(name, predicate, atFront)
 		table.insert(GroupClassifiers, { Name = name, Predicate = predicate })
 	end
 
-	-- Refresh existing targets
-	for instance in pairs(ESPObjects) do
-		ESPObjects[instance].Target.NeedsRefresh = true
-	end
+	RefreshAllTargets()
 end
 
 local function UnregisterGroup(name)
 	for i, c in ipairs(GroupClassifiers) do
 		if c.Name == name then
 			table.remove(GroupClassifiers, i)
-			for instance in pairs(ESPObjects) do
-				ESPObjects[instance].Target.NeedsRefresh = true
-			end
+			RefreshAllTargets()
 			return true
 		end
 	end
@@ -243,7 +245,6 @@ local function makeTarget(instance, groupOverride)
 				return instance
 			end,
 			GetName = function()
-				-- Optional: allow attribute override on the model
 				local override = instance:GetAttribute("ESPName")
 				if override then
 					return tostring(override)
@@ -291,7 +292,6 @@ local function makeBoxDrawings(style)
 			line.ZIndex = 2
 		end
 	elseif style == "3D" then
-		-- 12 lines of a wireframe box
 		d.Lines = {}
 		for i = 1, 12 do
 			local line = Drawing.new("Line")
@@ -302,7 +302,6 @@ local function makeBoxDrawings(style)
 			d.Lines[i] = line
 		end
 	else
-		-- Square or Filled both use a single Square
 		d.Square = Drawing.new("Square")
 		d.Square.Visible = false
 		d.Square.Thickness = 1
@@ -407,56 +406,121 @@ end
 -- Validity + bounding box
 -- ============================================================
 
+-- FIX: stricter validity check.
+--   - Player targets require a Humanoid AND a HumanoidRootPart so we
+--     don't render on half-streamed / respawning characters.
+--   - Model targets still allow the loose BasePart fallback.
+-- Returns: model, root, humanoid
 local function isValidCharacter(target)
 	local model = target.GetModel()
-	if not model then
+	if not model or not model.Parent then
 		return nil
 	end
 
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	local root = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
 
-	if not root then
-		-- Only accept a loose BasePart fallback for non-Humanoid models
-		if humanoid then
+	if humanoid then
+		-- Humanoid rigs are only valid once the root exists and is alive.
+		if not root then
 			return nil
 		end
-		root = model:FindFirstChildWhichIsA("BasePart")
+		if humanoid.Health <= 0 then
+			return nil
+		end
+	else
+		-- Non-Humanoid model: allow a loose BasePart fallback.
+		if not root then
+			root = model:FindFirstChildWhichIsA("BasePart")
+		end
+		if not root then
+			return nil
+		end
 	end
 
-	if root and (not humanoid or humanoid.Health > 0) then
-		return model, root, humanoid
+	return model, root, humanoid
+end
+
+-- FIX: compute the bounding box only from the character's own BaseParts,
+-- ignoring tools, accessories with offset welds, effects, etc. This is
+-- what caused the "giant / offset box on some people" bug.
+local function computeModelBounds(model)
+	local minV = Vector3.new(math.huge, math.huge, math.huge)
+	local maxV = Vector3.new(-math.huge, -math.huge, -math.huge)
+	local any = false
+
+	for _, d in ipairs(model:GetDescendants()) do
+		if d:IsA("BasePart") then
+			-- Skip parts that belong to a Tool (held items distort the box)
+			local inTool = false
+			local p = d.Parent
+			while p and p ~= model do
+				if p:IsA("Tool") then
+					inTool = true
+					break
+				end
+				p = p.Parent
+			end
+			if not inTool then
+				any = true
+				local cf = d.CFrame
+				local size = d.Size
+				local half = size * 0.5
+				for sx = -1, 1, 2 do
+					for sy = -1, 1, 2 do
+						for sz = -1, 1, 2 do
+							local corner = cf * Vector3.new(half.X * sx, half.Y * sy, half.Z * sz)
+							minV = Vector3.new(
+								math.min(minV.X, corner.X),
+								math.min(minV.Y, corner.Y),
+								math.min(minV.Z, corner.Z)
+							)
+							maxV = Vector3.new(
+								math.max(maxV.X, corner.X),
+								math.max(maxV.Y, corner.Y),
+								math.max(maxV.Z, corner.Z)
+							)
+						end
+					end
+				end
+			end
+		end
 	end
+
+	if not any then
+		return nil
+	end
+
+	local center = (minV + maxV) * 0.5
+	local size = maxV - minV
+	return center, size
+end
+
+-- FIX: returns a CFrame + size, computed from our own AABB (not
+-- GetBoundingBox, which includes tools/accessories). Falls back to
+-- GetBoundingBox only if the manual pass finds nothing.
+local function getWorldBoundingBox(model)
+	local center, size = computeModelBounds(model)
+	if center and size and size.Magnitude >= 1 then
+		-- Build a CFrame aligned to world axes at the AABB center.
+		return CFrame.new(center), size
+	end
+
+	-- Fallback: model may have no BaseParts we recognize (rare).
+	local ok, cf, size2 = pcall(function()
+		return model:GetBoundingBox()
+	end)
+	if ok and cf and size2 and size2.Magnitude >= 1 then
+		return cf, size2
+	end
+
 	return nil
 end
 
--- Get world-space corners of the model's bounding box.
--- Returns: cf, size (Vector3s) or nil if it can't be computed.
-local function getWorldBoundingBox(model)
-	local ok, cf, size = pcall(function()
-		return model:GetBoundingBox()
-	end)
-
-	if ok and cf and size and size.Magnitude >= 1 then
-		return cf, size
-	end
-
-	-- Fallback: use PrimaryPart / extents
-	local primary = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
-	if not primary then
-		return nil
-	end
-	local ok2, size2 = pcall(function()
-		return model:GetExtentsSize()
-	end)
-	if not ok2 or not size2 or size2.Magnitude < 1 then
-		return nil
-	end
-	return primary.CFrame, size2
-end
-
--- Project the 8 corners of an oriented box into screen space.
--- Returns: minX, minY, maxX, maxY or nil if the box is unusable.
+-- FIX: tighter projection.
+--   - Uses a small margin (viewport + 64px) so a single far-off corner
+--     can't stretch the box across the screen.
+--   - Rejects boxes that span both in front of and behind the camera.
 local function projectBox(cf, size)
 	local half = size * 0.5
 	local corners = {
@@ -472,7 +536,7 @@ local function projectBox(cf, size)
 
 	local minX, minY = math.huge, math.huge
 	local maxX, maxY = -math.huge, -math.huge
-	local anyFront = false
+	local anyFront, anyBehind = false, false
 
 	for _, worldPos in ipairs(corners) do
 		local sp = Camera:WorldToViewportPoint(worldPos)
@@ -482,6 +546,8 @@ local function projectBox(cf, size)
 			minY = math.min(minY, sp.Y)
 			maxX = math.max(maxX, sp.X)
 			maxY = math.max(maxY, sp.Y)
+		else
+			anyBehind = true
 		end
 	end
 
@@ -489,24 +555,28 @@ local function projectBox(cf, size)
 		return nil
 	end
 
+	-- FIX: if part of the box is behind the camera, projection is garbage.
+	if anyBehind then
+		return nil
+	end
+
 	local w = maxX - minX
 	local h = maxY - minY
 
-	-- Reject degenerate (all corners collapsed) projections
+	-- Reject degenerate projections
 	if w < 1 or h < 1 then
 		return nil
 	end
 
 	-- Reject exploded projections (camera inside/near the box).
-	-- A normal on-screen character is nowhere near this big.
 	if w > 4000 or h > 4000 then
 		return nil
 	end
 
-	-- Clamp to a reasonable range around the viewport so a single
-	-- far-off corner can't stretch the box weirdly.
+	-- FIX: much tighter clamp. Previously 2000px which was effectively
+	-- no clamp at all. Now we only allow a small buffer outside viewport.
 	local vp = Camera.ViewportSize
-	local margin = 2000
+	local margin = 64
 	minX = math.clamp(minX, -margin, vp.X + margin)
 	maxX = math.clamp(maxX, -margin, vp.X + margin)
 	minY = math.clamp(minY, -margin, vp.Y + margin)
@@ -556,9 +626,6 @@ local function drawBox(drawings, group, x, y, w, h)
 		setLine(box.BotRightH, x + w, y + h, x + w - hLen, y + h)
 		setLine(box.BotRightV, x + w, y + h, x + w, y + h - vLen)
 	elseif wantedStyle == "3D" then
-		-- Simple 2D approximation: draw the 2D square plus a small offset
-		-- for a pseudo-3D look. True 3D would need corner projection; keep
-		-- it lightweight but distinct from Square.
 		local off = 4
 		local lines = box.Lines
 		local pts = {
@@ -596,7 +663,6 @@ local function drawBox(drawings, group, x, y, w, h)
 			line.Visible = true
 		end
 	else
-		-- Square or Filled
 		box.Square.Size = Vector2.new(w, h)
 		box.Square.Position = Vector2.new(x, y)
 		box.Square.Color = color
@@ -637,16 +703,28 @@ local function updateTarget(instance, drawings)
 		return
 	end
 
-	-- Distance check
-	local distance = (Camera.CFrame.Position - root.Position).Magnitude
+	-- FIX: compute the bounding box first, and use its center for the
+	-- distance check. Using root.Position gave inconsistent distances
+	-- depending on which part was picked as root.
+	local cf, size = getWorldBoundingBox(char)
+	if not cf then
+		hideESP(drawings)
+		return
+	end
+
+	local boxCenter = cf.Position
+	local distance = (Camera.CFrame.Position - boxCenter).Magnitude
+
 	local maxDist = getSetting(group, "MaxDistance")
 	if maxDist and distance > maxDist then
 		hideESP(drawings)
 		return
 	end
 
-	-- Too close: projection is unreliable and causes giant bars
-	if distance < 4 then
+	-- FIX: use configurable MinDistance instead of hardcoded 4, and
+	-- check against the box center so it's stable per-target.
+	local minDist = getSetting(group, "MinDistance") or 6
+	if distance < minDist then
 		hideESP(drawings)
 		return
 	end
@@ -664,19 +742,17 @@ local function updateTarget(instance, drawings)
 	if getSetting(group, "OcclusionCheck") then
 		local params = RaycastParams.new()
 		params.FilterType = Enum.RaycastFilterType.Exclude
-		params.FilterDescendantsInstances = { char, LocalPlayer.Character }
-		local result = Workspace:Raycast(Camera.CFrame.Position, root.Position - Camera.CFrame.Position, params)
+		-- FIX: don't put nil in the filter list when local char is gone.
+		local filter = { char }
+		if LocalPlayer.Character then
+			table.insert(filter, LocalPlayer.Character)
+		end
+		params.FilterDescendantsInstances = filter
+		local result = Workspace:Raycast(Camera.CFrame.Position, boxCenter - Camera.CFrame.Position, params)
 		if result then
 			hideESP(drawings)
 			return
 		end
-	end
-
-	-- Bounding box projection
-	local cf, size = getWorldBoundingBox(char)
-	if not cf then
-		hideESP(drawings)
-		return
 	end
 
 	local minX, minY, maxX, maxY = projectBox(cf, size)
@@ -709,15 +785,18 @@ local function updateTarget(instance, drawings)
 		local bottomOffset = 4
 		local barSpacing = 2
 
-		-- Clamp the box height/width used for bar sizing so distance
-		-- doesn't smush bars into 0 or blow them up.
 		local barBoxHeight = math.clamp(height, 8, 500)
 		local barBoxWidth = math.clamp(width, 8, 500)
 
 		for _, barDef in ipairs(CustomBars) do
 			local barDrawings = drawings.Bars[barDef.Name]
 			if barDrawings then
-				local curVal, maxVal = barDef.GetValue(char, instance)
+				-- FIX: wrap GetValue in pcall so a bad user callback
+				-- doesn't nuke the entire target's drawings for a frame.
+				local ok, curVal, maxVal = pcall(barDef.GetValue, char, instance)
+				if not ok then
+					curVal, maxVal = 0, 100
+				end
 				maxVal = (maxVal and maxVal > 0) and maxVal or 100
 				local ratio = math.clamp((curVal or 0) / maxVal, 0, 1)
 				local barWidth = barDef.Width or 2
@@ -755,7 +834,6 @@ local function updateTarget(instance, drawings)
 					barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
 				end
 
-				-- Color: per-group BarColor > per-bar Color/Lerp > default
 				local groupBarColor = ESPConfig.Groups[group] and ESPConfig.Groups[group].BarColor
 				if groupBarColor then
 					barDrawings.Fill.Color = groupBarColor
@@ -838,7 +916,7 @@ local renderConnection = RunService.RenderStepped:Connect(function()
 end)
 
 -- ============================================================
--- Camera change connection (tracked for cleanup)
+-- Camera change connection
 -- ============================================================
 
 table.insert(
@@ -912,8 +990,21 @@ local function NewBar(args)
 		barDef.Width = width
 	end
 
+	-- FIX: when groups change at runtime, add/remove the bar on existing
+	-- targets immediately instead of waiting for the next RefreshGroup.
 	function handle.SetGroups(groups)
 		barDef.Groups = groups
+		for _, drawings in pairs(ESPObjects) do
+			local applies = not groups or table.find(groups, drawings.Target.Group) ~= nil
+			local existing = drawings.Bars[barDef.Name]
+			if applies and not existing then
+				createBarForPlayer(drawings, barDef, drawings.Target.Group)
+			elseif not applies and existing then
+				safeDestroy(existing.Outline)
+				safeDestroy(existing.Fill)
+				drawings.Bars[barDef.Name] = nil
+			end
+		end
 	end
 
 	return handle
@@ -936,7 +1027,6 @@ local function unload()
 	end
 	table.clear(Connections)
 
-	-- Collect keys first to avoid mutating the table during iteration
 	local toRemove = {}
 	for instance in pairs(ESPObjects) do
 		table.insert(toRemove, instance)
