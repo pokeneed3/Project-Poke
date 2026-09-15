@@ -18,9 +18,7 @@ local ESPConfig = {
 	TextSize = 14,
 	BoxStyle = "Square", -- "Square" | "Corners" | "Filled" | "3D"
 	BoxThickness = 1,
-	-- FIX: Transparency semantics: 0 = opaque, 1 = invisible.
-	-- Original default of 1 made the box invisible by default.
-	BoxTransparency = 0,
+	BoxTransparency = 1,
 	CornerLength = 0.25, -- fraction of box side, for "Corners"
 	MaxDistance = math.huge, -- studs; hide beyond this
 	TeamCheck = false,
@@ -107,40 +105,6 @@ local function resolveGroup(instance)
 end
 
 -- ============================================================
--- RefreshGroup (FIX: moved above Register/Unregister so the
--- local is in scope when those functions capture it)
--- ============================================================
-
-local RefreshGroup = function(instance)
-	local drawings = ESPObjects[instance]
-	if not drawings then
-		return
-	end
-
-	local newGroup = resolveGroup(instance)
-	if newGroup == drawings.Target.Group then
-		return
-	end
-	drawings.Target.Group = newGroup
-
-	for _, barDef in ipairs(CustomBars) do
-		local applies = not barDef.Groups or table.find(barDef.Groups, newGroup) ~= nil
-		local existing = drawings.Bars[barDef.Name]
-
-		if applies and not existing then
-			-- FIX: createBarForPlayer is defined below; forward-declare it.
-			if createBarForPlayer then
-				createBarForPlayer(drawings, barDef, newGroup)
-			end
-		elseif not applies and existing then
-			safeDestroy(existing.Outline)
-			safeDestroy(existing.Fill)
-			drawings.Bars[barDef.Name] = nil
-		end
-	end
-end
-
--- ============================================================
 -- Group registration
 -- ============================================================
 
@@ -193,8 +157,7 @@ end
 -- Bars
 -- ============================================================
 
--- FIX: forward declaration so RefreshGroup (defined above) can call this.
-createBarForPlayer = function(playerDrawings, barDef, group)
+local function createBarForPlayer(playerDrawings, barDef, group)
 	if barDef.Groups and not table.find(barDef.Groups, group) then
 		return
 	end
@@ -204,8 +167,7 @@ createBarForPlayer = function(playerDrawings, barDef, group)
 	outline.Color = Color3.fromRGB(0, 0, 0)
 	outline.Thickness = 1
 	outline.Filled = true
-	-- FIX: outline transparency also follows 0=opaque semantics.
-	outline.Transparency = 0.2
+	outline.Transparency = 0.8
 	outline.ZIndex = 2
 
 	local fill = Drawing.new("Square")
@@ -213,7 +175,7 @@ createBarForPlayer = function(playerDrawings, barDef, group)
 	fill.Color = barDef.Color or Color3.fromRGB(0, 255, 0)
 	fill.Thickness = 1
 	fill.Filled = true
-	fill.Transparency = 0
+	fill.Transparency = 1
 	fill.ZIndex = 3
 
 	playerDrawings.Bars[barDef.Name] = {
@@ -221,6 +183,32 @@ createBarForPlayer = function(playerDrawings, barDef, group)
 		Fill = fill,
 		Def = barDef,
 	}
+end
+
+local RefreshGroup = function(instance)
+	local drawings = ESPObjects[instance]
+	if not drawings then
+		return
+	end
+
+	local newGroup = resolveGroup(instance)
+	if newGroup == drawings.Target.Group then
+		return
+	end
+	drawings.Target.Group = newGroup
+
+	for _, barDef in ipairs(CustomBars) do
+		local applies = not barDef.Groups or table.find(barDef.Groups, newGroup) ~= nil
+		local existing = drawings.Bars[barDef.Name]
+
+		if applies and not existing then
+			createBarForPlayer(drawings, barDef, newGroup)
+		elseif not applies and existing then
+			safeDestroy(existing.Outline)
+			safeDestroy(existing.Fill)
+			drawings.Bars[barDef.Name] = nil
+		end
+	end
 end
 
 -- ============================================================
@@ -299,7 +287,7 @@ local function makeBoxDrawings(style)
 		for _, line in ipairs(d.All) do
 			line.Visible = false
 			line.Thickness = 1
-			line.Transparency = 0
+			line.Transparency = 1
 			line.ZIndex = 2
 		end
 	elseif style == "3D" then
@@ -309,7 +297,7 @@ local function makeBoxDrawings(style)
 			local line = Drawing.new("Line")
 			line.Visible = false
 			line.Thickness = 1
-			line.Transparency = 0
+			line.Transparency = 1
 			line.ZIndex = 2
 			d.Lines[i] = line
 		end
@@ -319,8 +307,7 @@ local function makeBoxDrawings(style)
 		d.Square.Visible = false
 		d.Square.Thickness = 1
 		d.Square.Filled = (style == "Filled")
-		-- FIX: default transparency, actual value is set per-frame from config.
-		d.Square.Transparency = (style == "Filled") and 0.5 or 0
+		d.Square.Transparency = (style == "Filled") and 0.5 or 1
 		d.Square.ZIndex = 2
 	end
 	return d
@@ -427,9 +414,15 @@ local function isValidCharacter(target)
 	end
 
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
-	local root = model:FindFirstChild("HumanoidRootPart")
-		or model.PrimaryPart
-		or model:FindFirstChildWhichIsA("BasePart")
+	local root = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+
+	if not root then
+		-- Only accept a loose BasePart fallback for non-Humanoid models
+		if humanoid then
+			return nil
+		end
+		root = model:FindFirstChildWhichIsA("BasePart")
+	end
 
 	if root and (not humanoid or humanoid.Health > 0) then
 		return model, root, humanoid
@@ -437,14 +430,14 @@ local function isValidCharacter(target)
 	return nil
 end
 
--- Get world-space CFrame + size for the model's bounding box.
+-- Get world-space corners of the model's bounding box.
 -- Returns: cf, size (Vector3s) or nil if it can't be computed.
 local function getWorldBoundingBox(model)
 	local ok, cf, size = pcall(function()
 		return model:GetBoundingBox()
 	end)
 
-	if ok and cf and size then
+	if ok and cf and size and size.Magnitude >= 1 then
 		return cf, size
 	end
 
@@ -456,14 +449,14 @@ local function getWorldBoundingBox(model)
 	local ok2, size2 = pcall(function()
 		return model:GetExtentsSize()
 	end)
-	if not ok2 then
+	if not ok2 or not size2 or size2.Magnitude < 1 then
 		return nil
 	end
 	return primary.CFrame, size2
 end
 
 -- Project the 8 corners of an oriented box into screen space.
--- Returns: minX, minY, maxX, maxY, or nil if all corners are behind camera.
+-- Returns: minX, minY, maxX, maxY or nil if the box is unusable.
 local function projectBox(cf, size)
 	local half = size * 0.5
 	local corners = {
@@ -485,24 +478,40 @@ local function projectBox(cf, size)
 		local sp = Camera:WorldToViewportPoint(worldPos)
 		if sp.Z > 0 then
 			anyFront = true
-			if sp.X < minX then
-				minX = sp.X
-			end
-			if sp.Y < minY then
-				minY = sp.Y
-			end
-			if sp.X > maxX then
-				maxX = sp.X
-			end
-			if sp.Y > maxY then
-				maxY = sp.Y
-			end
+			minX = math.min(minX, sp.X)
+			minY = math.min(minY, sp.Y)
+			maxX = math.max(maxX, sp.X)
+			maxY = math.max(maxY, sp.Y)
 		end
 	end
 
 	if not anyFront then
 		return nil
 	end
+
+	local w = maxX - minX
+	local h = maxY - minY
+
+	-- Reject degenerate (all corners collapsed) projections
+	if w < 1 or h < 1 then
+		return nil
+	end
+
+	-- Reject exploded projections (camera inside/near the box).
+	-- A normal on-screen character is nowhere near this big.
+	if w > 4000 or h > 4000 then
+		return nil
+	end
+
+	-- Clamp to a reasonable range around the viewport so a single
+	-- far-off corner can't stretch the box weirdly.
+	local vp = Camera.ViewportSize
+	local margin = 2000
+	minX = math.clamp(minX, -margin, vp.X + margin)
+	maxX = math.clamp(maxX, -margin, vp.X + margin)
+	minY = math.clamp(minY, -margin, vp.Y + margin)
+	maxY = math.clamp(maxY, -margin, vp.Y + margin)
+
 	return minX, minY, maxX, maxY
 end
 
@@ -547,85 +556,44 @@ local function drawBox(drawings, group, x, y, w, h)
 		setLine(box.BotRightH, x + w, y + h, x + w - hLen, y + h)
 		setLine(box.BotRightV, x + w, y + h, x + w, y + h - vLen)
 	elseif wantedStyle == "3D" then
-		-- FIX: The original "3D" style was a fixed 2D offset (always the
-		-- same regardless of camera angle). This version projects the
-		-- model's actual 8 corners and connects them, giving a real
-		-- 3D wireframe. The corners are passed in via `drawings.Box.ProjectedCorners`
-		-- (set below in updateTarget) to avoid recomputing here.
-		local corners = box.ProjectedCorners
+		-- Simple 2D approximation: draw the 2D square plus a small offset
+		-- for a pseudo-3D look. True 3D would need corner projection; keep
+		-- it lightweight but distinct from Square.
+		local off = 4
 		local lines = box.Lines
-
-		if corners then
-			-- Corner order matches projectBox's ordering:
-			-- 1..4 = back face (z = -half), 5..8 = front face (z = +half)
-			-- (1,2,3,4) form back quad, (5,6,7,8) form front quad.
-			local edges = {
-				{ 1, 2 },
-				{ 2, 4 },
-				{ 4, 3 },
-				{ 3, 1 }, -- back
-				{ 5, 6 },
-				{ 6, 8 },
-				{ 8, 7 },
-				{ 7, 5 }, -- front
-				{ 1, 5 },
-				{ 2, 6 },
-				{ 3, 7 },
-				{ 4, 8 }, -- connectors
-			}
-			for i = 1, 12 do
-				local line = lines[i]
-				local e = edges[i]
-				local a = corners[e[1]]
-				local b = corners[e[2]]
-				if a and b then
-					line.From = a
-					line.To = b
-					line.Color = color
-					line.Thickness = thickness
-					line.Transparency = transparency
-					line.Visible = true
-				else
-					line.Visible = false
-				end
-			end
-		else
-			-- Fallback: draw a flat 2D box if corners weren't provided
-			local off = 4
-			local pts = {
-				Vector2.new(x, y),
-				Vector2.new(x + w, y),
-				Vector2.new(x + w, y + h),
-				Vector2.new(x, y + h),
-			}
-			local back = {}
-			for i, p in ipairs(pts) do
-				back[i] = Vector2.new(p.X + off, p.Y - off)
-			end
-			local edges = {
-				{ pts[1], pts[2] },
-				{ pts[2], pts[3] },
-				{ pts[3], pts[4] },
-				{ pts[4], pts[1] },
-				{ back[1], back[2] },
-				{ back[2], back[3] },
-				{ back[3], back[4] },
-				{ back[4], back[1] },
-				{ pts[1], back[1] },
-				{ pts[2], back[2] },
-				{ pts[3], back[3] },
-				{ pts[4], back[4] },
-			}
-			for i = 1, 12 do
-				local line = lines[i]
-				local e = edges[i]
-				line.From = e[1]
-				line.To = e[2]
-				line.Color = color
-				line.Thickness = thickness
-				line.Transparency = transparency
-				line.Visible = true
-			end
+		local pts = {
+			Vector2.new(x, y),
+			Vector2.new(x + w, y),
+			Vector2.new(x + w, y + h),
+			Vector2.new(x, y + h),
+		}
+		local back = {}
+		for i, p in ipairs(pts) do
+			back[i] = Vector2.new(p.X + off, p.Y - off)
+		end
+		local edges = {
+			{ pts[1], pts[2] },
+			{ pts[2], pts[3] },
+			{ pts[3], pts[4] },
+			{ pts[4], pts[1] },
+			{ back[1], back[2] },
+			{ back[2], back[3] },
+			{ back[3], back[4] },
+			{ back[4], back[1] },
+			{ pts[1], back[1] },
+			{ pts[2], back[2] },
+			{ pts[3], back[3] },
+			{ pts[4], back[4] },
+		}
+		for i = 1, 12 do
+			local line = lines[i]
+			local e = edges[i]
+			line.From = e[1]
+			line.To = e[2]
+			line.Color = color
+			line.Thickness = thickness
+			line.Transparency = transparency
+			line.Visible = true
 		end
 	else
 		-- Square or Filled
@@ -633,9 +601,7 @@ local function drawBox(drawings, group, x, y, w, h)
 		box.Square.Position = Vector2.new(x, y)
 		box.Square.Color = color
 		box.Square.Thickness = thickness
-		-- FIX: Filled style now respects the configured transparency.
-		-- If you want a hardcoded softer fill, set BoxTransparency per group.
-		box.Square.Transparency = transparency
+		box.Square.Transparency = (wantedStyle == "Filled") and 0.5 or transparency
 		box.Square.Filled = (wantedStyle == "Filled")
 		box.Square.Visible = true
 	end
@@ -679,15 +645,16 @@ local function updateTarget(instance, drawings)
 		return
 	end
 
-	-- FIX: TeamCheck guard. Previously, if both the local player and the
-	-- target had no team (nil == nil), they were treated as teammates and
-	-- hidden. Now we require the target to actually have a team.
-	local teamCheckEnabled = getSetting(group, "TeamCheck")
-	local isTeammate = false
-	if teamCheckEnabled and LocalPlayer.Team ~= nil then
-		local targetTeam = target.GetTeam()
-		isTeammate = (targetTeam ~= nil) and (targetTeam == LocalPlayer.Team)
+	-- Too close: projection is unreliable and causes giant bars
+	if distance < 4 then
+		hideESP(drawings)
+		return
 	end
+
+	-- Team check (per-group)
+	local isTeammate = getSetting(group, "TeamCheck")
+		and LocalPlayer.Team ~= nil
+		and target.GetTeam() == LocalPlayer.Team
 	if isTeammate then
 		hideESP(drawings)
 		return
@@ -728,30 +695,6 @@ local function updateTarget(instance, drawings)
 	local width = math.max(maxX - minX, 1)
 	local height = math.max(maxY - minY, 1)
 
-	-- FIX: For the real "3D" style, compute projected corners once and
-	-- stash them on the drawings so drawBox can use them.
-	if getSetting(group, "BoxStyle") == "3D" then
-		local half = size * 0.5
-		local worldCorners = {
-			cf * Vector3.new(-half.X, -half.Y, -half.Z),
-			cf * Vector3.new(half.X, -half.Y, -half.Z),
-			cf * Vector3.new(-half.X, half.Y, -half.Z),
-			cf * Vector3.new(half.X, half.Y, -half.Z),
-			cf * Vector3.new(-half.X, -half.Y, half.Z),
-			cf * Vector3.new(half.X, -half.Y, half.Z),
-			cf * Vector3.new(-half.X, half.Y, half.Z),
-			cf * Vector3.new(half.X, half.Y, half.Z),
-		}
-		local projected = {}
-		for i, wp in ipairs(worldCorners) do
-			local sp = Camera:WorldToViewportPoint(wp)
-			if sp.Z > 0 then
-				projected[i] = Vector2.new(sp.X, sp.Y)
-			end
-		end
-		drawings.Box.ProjectedCorners = projected
-	end
-
 	-- Box
 	if getSetting(group, "ShowBox") then
 		drawBox(drawings, group, boxX, boxY, width, height)
@@ -766,6 +709,13 @@ local function updateTarget(instance, drawings)
 		local bottomOffset = 4
 		local barSpacing = 2
 
+		-- Fixed pixel size for bars so they don't scale with distance.
+		-- Bars are anchored to the box but keep a constant on-screen size.
+		local FIXED_BAR_HEIGHT = 40 -- pixels, vertical bars (Left/Right)
+		local FIXED_BAR_WIDTH = 40 -- pixels, horizontal bars (Bottom)
+		local barBoxHeight = FIXED_BAR_HEIGHT
+		local barBoxWidth = FIXED_BAR_WIDTH
+
 		for _, barDef in ipairs(CustomBars) do
 			local barDrawings = drawings.Bars[barDef.Name]
 			if barDrawings then
@@ -779,19 +729,19 @@ local function updateTarget(instance, drawings)
 					rightOffset = rightOffset + barWidth + barSpacing + 2
 
 					barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
-					barDrawings.Outline.Size = Vector2.new(barWidth + 2, height + 2)
+					barDrawings.Outline.Size = Vector2.new(barWidth + 2, barBoxHeight + 2)
 
-					local barHeight = math.floor(height * ratio)
-					barDrawings.Fill.Position = Vector2.new(barX, boxY + (height - barHeight))
+					local barHeight = math.clamp(math.floor(barBoxHeight * ratio), 0, barBoxHeight)
+					barDrawings.Fill.Position = Vector2.new(barX, boxY + (barBoxHeight - barHeight))
 					barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
 				elseif barDef.Side == "Bottom" then
 					local barY = boxY + height + bottomOffset
 					bottomOffset = bottomOffset + barWidth + barSpacing + 2
 
 					barDrawings.Outline.Position = Vector2.new(boxX - 1, barY - 1)
-					barDrawings.Outline.Size = Vector2.new(width + 2, barWidth + 2)
+					barDrawings.Outline.Size = Vector2.new(barBoxWidth + 2, barWidth + 2)
 
-					local fillWidth = math.floor(width * ratio)
+					local fillWidth = math.clamp(math.floor(barBoxWidth * ratio), 0, barBoxWidth)
 					barDrawings.Fill.Position = Vector2.new(boxX, barY)
 					barDrawings.Fill.Size = Vector2.new(fillWidth, barWidth)
 				else -- "Left"
@@ -800,10 +750,10 @@ local function updateTarget(instance, drawings)
 					leftOffset = leftOffset + barSpacing + 2
 
 					barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
-					barDrawings.Outline.Size = Vector2.new(barWidth + 2, height + 2)
+					barDrawings.Outline.Size = Vector2.new(barWidth + 2, barBoxHeight + 2)
 
-					local barHeight = math.floor(height * ratio)
-					barDrawings.Fill.Position = Vector2.new(barX, boxY + (height - barHeight))
+					local barHeight = math.clamp(math.floor(barBoxHeight * ratio), 0, barBoxHeight)
+					barDrawings.Fill.Position = Vector2.new(barX, boxY + (barBoxHeight - barHeight))
 					barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
 				end
 
@@ -935,9 +885,6 @@ local function NewBar(args)
 	local handle = {}
 
 	function handle.Remove()
-		if handle.Removed then
-			return
-		end
 		for i, def in ipairs(CustomBars) do
 			if def.Name == barDef.Name then
 				table.remove(CustomBars, i)
@@ -1002,11 +949,6 @@ local function unload()
 
 	table.clear(CustomBars)
 	table.clear(GroupClassifiers)
-
-	-- FIX: Reset config groups so a re-init starts clean.
-	-- (Comment this out if you want config to persist across unload/reload.)
-	ESPConfig.Groups = {}
-	ESPConfig.Defaults = {}
 end
 
 -- ============================================================
