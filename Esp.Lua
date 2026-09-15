@@ -19,7 +19,11 @@ local ESPConfig = {
 	BoxStyle = "Square", -- "Square" | "Corners" | "Filled" | "3D"
 	BoxThickness = 1,
 	BoxTransparency = 1,
-	FixedBoxSize = Vector2.new(60, 100), -- width, height in pixels (CONSTANT at any distance)
+
+	-- ABSOLUTE fixed pixel size. The box will ALWAYS be exactly this
+	-- size on screen, at any distance, for any character.
+	FixedBoxSize = Vector2.new(60, 100),
+
 	CornerLength = 0.25, -- fraction of box side, for "Corners"
 	MaxDistance = math.huge, -- studs; hide beyond this
 	TeamCheck = false,
@@ -32,9 +36,13 @@ local ESPConfig = {
 	OcclusionCheck = false, -- raycast from camera to root
 	Padding = 0, -- extra pixels around box
 
-	-- If true, the box will scale with the character's world-space size
-	-- instead of staying a fixed pixel size. Default false = constant size.
-	ScaleWithDistance = false,
+	-- ABSOLUTE fixed bar thickness in pixels. Never changes.
+	FixedBarWidth = 4,
+
+	-- ABSOLUTE fixed bar length in pixels. If nil, uses the box dimension
+	-- (height for Left/Right bars, width for Bottom bars). Set a number
+	-- to hard-lock the bar length regardless of box size.
+	FixedBarLength = nil,
 
 	-- Optional global text formatter.
 	-- Signature: function(target, char, distance, group) -> string
@@ -43,11 +51,7 @@ local ESPConfig = {
 	-- Fallback group config applied when a group has no explicit key.
 	Defaults = {},
 
-	-- Per-group overrides, e.g.
-	-- Groups = {
-	--   Player = { BoxColor = Color3.fromRGB(255,0,0) },
-	--   NPC    = { BoxColor = Color3.fromRGB(0,255,0), MaxDistance = 500 },
-	-- }
+	-- Per-group overrides
 	Groups = {},
 }
 
@@ -60,8 +64,6 @@ local Connections = {}
 -- Helpers
 -- ============================================================
 
--- Resolve a setting for a group with fallback chain:
---   Groups[group][key] -> Groups.Default[key] -> Defaults[key] -> ESPConfig[key]
 local function getSetting(group, key)
 	local groupCfg = ESPConfig.Groups[group]
 	if groupCfg and groupCfg[key] ~= nil then
@@ -124,7 +126,6 @@ local function RegisterGroup(name, predicate, atFront)
 				break
 			else
 				c.Predicate = predicate
-				-- Refresh existing targets so the new predicate takes effect
 				for instance in pairs(ESPObjects) do
 					ESPObjects[instance].Target.NeedsRefresh = true
 				end
@@ -139,7 +140,6 @@ local function RegisterGroup(name, predicate, atFront)
 		table.insert(GroupClassifiers, { Name = name, Predicate = predicate })
 	end
 
-	-- Refresh existing targets
 	for instance in pairs(ESPObjects) do
 		ESPObjects[instance].Target.NeedsRefresh = true
 	end
@@ -248,7 +248,6 @@ local function makeTarget(instance, groupOverride)
 				return instance
 			end,
 			GetName = function()
-				-- Optional: allow attribute override on the model
 				local override = instance:GetAttribute("ESPName")
 				if override then
 					return tostring(override)
@@ -296,7 +295,6 @@ local function makeBoxDrawings(style)
 			line.ZIndex = 2
 		end
 	elseif style == "3D" then
-		-- 12 lines of a wireframe box
 		d.Lines = {}
 		for i = 1, 12 do
 			local line = Drawing.new("Line")
@@ -307,7 +305,6 @@ local function makeBoxDrawings(style)
 			d.Lines[i] = line
 		end
 	else
-		-- Square or Filled both use a single Square
 		d.Square = Drawing.new("Square")
 		d.Square.Visible = false
 		d.Square.Thickness = 1
@@ -429,140 +426,30 @@ local function isValidCharacter(target)
 	return nil
 end
 
--- Get world-space bounding box of ONLY the character's body parts.
--- Ignores tools, accessories, hats, particles, etc.
--- Returns: cf, size (CFrame, Vector3) or nil if it can't be computed.
-local function getWorldBoundingBox(model)
-	-- Collect body parts that actually belong to the character rig.
-	local parts = {}
-
-	-- Preferred: use the Humanoid's descendants (body parts live under the rig,
-	-- not under accessories/tools). If there's no Humanoid, fall back to the
-	-- whole model but still skip known non-body containers.
-	local humanoid = model:FindFirstChildOfClass("Humanoid")
-	local searchRoot = humanoid or model
-
-	for _, descendant in ipairs(searchRoot:GetDescendants()) do
-		if descendant:IsA("BasePart") then
-			-- Skip anything parented under a tool or accessory
-			local parent = descendant.Parent
-			local skip = false
-			while parent and parent ~= model do
-				if parent:IsA("Tool") or parent:IsA("Accessory") or parent:IsA("Accoutrement") then
-					skip = true
-					break
-				end
-				parent = parent.Parent
-			end
-			if not skip then
-				table.insert(parts, descendant)
-			end
-		end
-	end
-
-	-- Fallback: if the Humanoid search yielded nothing, use PrimaryPart
-	if #parts == 0 then
-		local primary = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
-		if not primary then
-			return nil
-		end
-		local ok, size = pcall(function()
-			return model:GetExtentsSize()
-		end)
-		if not ok then
-			return nil
-		end
-		return primary.CFrame, size
-	end
-
-	-- Compute min/max world-space corners from the actual body parts.
-	local minV = Vector3.new(math.huge, math.huge, math.huge)
-	local maxV = Vector3.new(-math.huge, -math.huge, -math.huge)
-
-	for _, part in ipairs(parts) do
-		local cf = part.CFrame
-		local half = part.Size * 0.5
-		-- 8 corners of the part's oriented box
-		local corners = {
-			cf * Vector3.new(-half.X, -half.Y, -half.Z),
-			cf * Vector3.new(half.X, -half.Y, -half.Z),
-			cf * Vector3.new(-half.X, half.Y, -half.Z),
-			cf * Vector3.new(half.X, half.Y, -half.Z),
-			cf * Vector3.new(-half.X, -half.Y, half.Z),
-			cf * Vector3.new(half.X, -half.Y, half.Z),
-			cf * Vector3.new(-half.X, half.Y, half.Z),
-			cf * Vector3.new(half.X, half.Y, half.Z),
-		}
-		for _, c in ipairs(corners) do
-			minV = Vector3.new(math.min(minV.X, c.X), math.min(minV.Y, c.Y), math.min(minV.Z, c.Z))
-			maxV = Vector3.new(math.max(maxV.X, c.X), math.max(maxV.Y, c.Y), math.max(maxV.Z, c.Z))
-		end
-	end
-
-	-- Build an axis-aligned CFrame + size from the extents.
-	local center = (minV + maxV) * 0.5
-	local size = maxV - minV
-	return CFrame.new(center), size
-end
-
 -- ============================================================
 -- Box drawing
 -- ============================================================
 
--- Projects the target to screen space.
--- If ScaleWithDistance is false (default), the box is a FIXED pixel
--- size (FixedBoxSize) regardless of how far the target is from the camera.
--- If true, it scales with the character's world-space extents.
-local function projectBox(cf, size, group)
-	local center = cf.Position
-	local centerScreen = Camera:WorldToViewportPoint(center)
+-- Projects the target's ROOT POSITION to screen space and returns a
+-- FIXED-size box centered on it. The world-space extents are never
+-- used, so the on-screen size is byte-for-byte identical at any
+-- distance, for any character, always.
+local function projectBox(root, group)
+	local pos = root.Position
+	local sp = Camera:WorldToViewportPoint(pos)
 
-	if centerScreen.Z <= 0 then
+	if sp.Z <= 0 then
 		return nil
 	end
 
-	local screenWidth, screenHeight
-
-	if getSetting(group, "ScaleWithDistance") then
-		-- Optional: project the world-space extents into screen space.
-		-- This WILL change with distance.
-		local half = size * 0.5
-		local corners = {
-			cf * Vector3.new(-half.X, -half.Y, -half.Z),
-			cf * Vector3.new(half.X, -half.Y, -half.Z),
-			cf * Vector3.new(-half.X, half.Y, -half.Z),
-			cf * Vector3.new(half.X, half.Y, -half.Z),
-			cf * Vector3.new(-half.X, -half.Y, half.Z),
-			cf * Vector3.new(half.X, -half.Y, half.Z),
-			cf * Vector3.new(-half.X, half.Y, half.Z),
-			cf * Vector3.new(half.X, half.Y, half.Z),
-		}
-		local minX, minY = math.huge, math.huge
-		local maxX, maxY = -math.huge, -math.huge
-		for _, corner in ipairs(corners) do
-			local sp = Camera:WorldToViewportPoint(corner)
-			if sp.Z > 0 then
-				minX = math.min(minX, sp.X)
-				minY = math.min(minY, sp.Y)
-				maxX = math.max(maxX, sp.X)
-				maxY = math.max(maxY, sp.Y)
-			end
-		end
-		if minX == math.huge then
-			return nil
-		end
-		return minX, minY, maxX, maxY
-	end
-
-	-- Default: fixed pixel size — does NOT change with distance.
 	local fixed = getSetting(group, "FixedBoxSize") or Vector2.new(60, 100)
-	screenWidth = fixed.X
-	screenHeight = fixed.Y
+	local w = fixed.X
+	local h = fixed.Y
 
-	local minX = centerScreen.X - screenWidth * 0.5
-	local maxX = centerScreen.X + screenWidth * 0.5
-	local minY = centerScreen.Y - screenHeight * 0.5
-	local maxY = centerScreen.Y + screenHeight * 0.5
+	local minX = sp.X - w * 0.5
+	local maxX = sp.X + w * 0.5
+	local minY = sp.Y - h * 0.5
+	local maxY = sp.Y + h * 0.5
 
 	return minX, minY, maxX, maxY
 end
@@ -574,7 +461,6 @@ local function drawBox(drawings, group, x, y, w, h)
 	local transparency = getSetting(group, "BoxTransparency")
 	local wantedStyle = getSetting(group, "BoxStyle")
 
-	-- Rebuild drawings if the style changed at runtime
 	if box.Style ~= wantedStyle then
 		destroyBoxDrawings(box)
 		drawings.Box = makeBoxDrawings(wantedStyle)
@@ -604,9 +490,6 @@ local function drawBox(drawings, group, x, y, w, h)
 		setLine(box.BotRightH, x + w, y + h, x + w - hLen, y + h)
 		setLine(box.BotRightV, x + w, y + h, x + w, y + h - vLen)
 	elseif wantedStyle == "3D" then
-		-- Simple 2D approximation: draw the 2D square plus a small offset
-		-- for a pseudo-3D look. True 3D would need corner projection; keep
-		-- it lightweight but distinct from Square.
 		local off = 4
 		local lines = box.Lines
 		local pts = {
@@ -644,7 +527,6 @@ local function drawBox(drawings, group, x, y, w, h)
 			line.Visible = true
 		end
 	else
-		-- Square or Filled
 		box.Square.Size = Vector2.new(w, h)
 		box.Square.Position = Vector2.new(x, y)
 		box.Square.Color = color
@@ -672,7 +554,6 @@ local function updateTarget(instance, drawings)
 	local target = drawings.Target
 	local group = target.Group
 
-	-- Group refresh if requested
 	if target.NeedsRefresh then
 		target.NeedsRefresh = false
 		RefreshGroup(instance)
@@ -685,7 +566,6 @@ local function updateTarget(instance, drawings)
 		return
 	end
 
-	-- Distance check
 	local distance = (Camera.CFrame.Position - root.Position).Magnitude
 	local maxDist = getSetting(group, "MaxDistance")
 	if maxDist and distance > maxDist then
@@ -693,7 +573,6 @@ local function updateTarget(instance, drawings)
 		return
 	end
 
-	-- Team check (per-group)
 	local isTeammate = getSetting(group, "TeamCheck")
 		and LocalPlayer.Team ~= nil
 		and target.GetTeam() == LocalPlayer.Team
@@ -702,7 +581,6 @@ local function updateTarget(instance, drawings)
 		return
 	end
 
-	-- Occlusion check (optional)
 	if getSetting(group, "OcclusionCheck") then
 		local params = RaycastParams.new()
 		params.FilterType = Enum.RaycastFilterType.Exclude
@@ -714,14 +592,8 @@ local function updateTarget(instance, drawings)
 		end
 	end
 
-	-- Bounding box projection
-	local cf, size = getWorldBoundingBox(char)
-	if not cf then
-		hideESP(drawings)
-		return
-	end
-
-	local minX, minY, maxX, maxY = projectBox(cf, size, group)
+	-- Fixed-size box centered on the root's screen position.
+	local minX, minY, maxX, maxY = projectBox(root, group)
 	if not minX then
 		hideESP(drawings)
 		return
@@ -734,18 +606,20 @@ local function updateTarget(instance, drawings)
 	maxY = maxY + pad
 
 	local boxX, boxY = minX, minY
-	local width = math.max(maxX - minX, 1)
-	local height = math.max(maxY - minY, 1)
+	local width = maxX - minX
+	local height = maxY - minY
 
-	-- Box
 	if getSetting(group, "ShowBox") then
 		drawBox(drawings, group, boxX, boxY, width, height)
 	else
 		hideBoxDrawings(drawings.Box)
 	end
 
-	-- Bars
+	-- Bars: thickness and length are BOTH absolute constants.
 	if getSetting(group, "ShowBars") then
+		local fixedBarWidth = getSetting(group, "FixedBarWidth") or 4
+		local fixedBarLength = getSetting(group, "FixedBarLength")
+
 		local leftOffset = 4
 		local rightOffset = 4
 		local bottomOffset = 4
@@ -758,53 +632,55 @@ local function updateTarget(instance, drawings)
 				maxVal = (maxVal and maxVal > 0) and maxVal or 100
 				local ratio = math.clamp((curVal or 0) / maxVal, 0, 1)
 
-				-- Clamp the bar's visual thickness
-				local barWidth = math.clamp(barDef.Width or 2, barDef.MinWidth or 1, barDef.MaxWidth or 8)
+				-- Per-bar override, else global fixed width. Clamped by Min/Max.
+				local barWidth = math.clamp(barDef.Width or fixedBarWidth, barDef.MinWidth or 1, barDef.MaxWidth or 999)
 
-				-- Clamp a length against MinLength / MaxLength.
-				-- The `limit` is the box dimension (height for L/R bars, width for Bottom bars).
-				local function clampLength(len, limit)
-					local maxLen = barDef.MaxLength or limit
-					return math.clamp(len, barDef.MinLength or 0, maxLen)
+				-- Determine the bar's length axis.
+				-- Vertical bars (Left/Right): length is along the box height.
+				-- Horizontal bars (Bottom): length is along the box width.
+				local lengthLimit
+				if barDef.Side == "Bottom" then
+					lengthLimit = fixedBarLength or width
+				else
+					lengthLimit = fixedBarLength or height
 				end
 
 				if barDef.Side == "Right" then
 					local barX = boxX + width + rightOffset
 					rightOffset = rightOffset + barWidth + barSpacing + 2
 
-					local outlineHeight = clampLength(height, height)
+					local outlineLength = lengthLimit
 					barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
-					barDrawings.Outline.Size = Vector2.new(barWidth + 2, outlineHeight + 2)
+					barDrawings.Outline.Size = Vector2.new(barWidth + 2, outlineLength + 2)
 
-					local barHeight = clampLength(math.floor(height * ratio), height)
-					barDrawings.Fill.Position = Vector2.new(barX, boxY + (height - barHeight))
-					barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
+					local fillLength = math.floor(lengthLimit * ratio)
+					barDrawings.Fill.Position = Vector2.new(barX, boxY + (lengthLimit - fillLength))
+					barDrawings.Fill.Size = Vector2.new(barWidth, fillLength)
 				elseif barDef.Side == "Bottom" then
 					local barY = boxY + height + bottomOffset
 					bottomOffset = bottomOffset + barWidth + barSpacing + 2
 
-					local outlineWidth = clampLength(width, width)
+					local outlineLength = lengthLimit
 					barDrawings.Outline.Position = Vector2.new(boxX - 1, barY - 1)
-					barDrawings.Outline.Size = Vector2.new(outlineWidth + 2, barWidth + 2)
+					barDrawings.Outline.Size = Vector2.new(outlineLength + 2, barWidth + 2)
 
-					local fillWidth = clampLength(math.floor(width * ratio), width)
+					local fillLength = math.floor(lengthLimit * ratio)
 					barDrawings.Fill.Position = Vector2.new(boxX, barY)
-					barDrawings.Fill.Size = Vector2.new(fillWidth, barWidth)
+					barDrawings.Fill.Size = Vector2.new(fillLength, barWidth)
 				else -- "Left"
 					leftOffset = leftOffset + barWidth
 					local barX = boxX - leftOffset
 					leftOffset = leftOffset + barSpacing + 2
 
-					local outlineHeight = clampLength(height, height)
+					local outlineLength = lengthLimit
 					barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
-					barDrawings.Outline.Size = Vector2.new(barWidth + 2, outlineHeight + 2)
+					barDrawings.Outline.Size = Vector2.new(barWidth + 2, outlineLength + 2)
 
-					local barHeight = clampLength(math.floor(height * ratio), height)
-					barDrawings.Fill.Position = Vector2.new(barX, boxY + (height - barHeight))
-					barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
+					local fillLength = math.floor(lengthLimit * ratio)
+					barDrawings.Fill.Position = Vector2.new(barX, boxY + (lengthLimit - fillLength))
+					barDrawings.Fill.Size = Vector2.new(barWidth, fillLength)
 				end
 
-				-- Color: per-group BarColor > per-bar Color/Lerp > default
 				local groupBarColor = getSetting(group, "BarColor")
 				if groupBarColor then
 					barDrawings.Fill.Color = groupBarColor
@@ -825,7 +701,7 @@ local function updateTarget(instance, drawings)
 		end
 	end
 
-	-- Text label
+	-- Text
 	local showName = getSetting(group, "ShowName")
 	local showDist = getSetting(group, "ShowDistance")
 
@@ -887,7 +763,7 @@ local renderConnection = RunService.RenderStepped:Connect(function()
 end)
 
 -- ============================================================
--- Camera change connection (tracked for cleanup)
+-- Camera change connection
 -- ============================================================
 
 table.insert(
@@ -914,11 +790,9 @@ local function NewBar(args)
 	local barDef = {
 		Name = args.Name,
 		Side = args.Side or "Left",
-		Width = args.Width or 2,
+		Width = args.Width, -- nil = use global FixedBarWidth
 		MinWidth = args.MinWidth or 1,
-		MaxWidth = args.MaxWidth or 8,
-		MinLength = args.MinLength or 0,
-		MaxLength = args.MaxLength, -- nil = use full box dimension
+		MaxWidth = args.MaxWidth or 999,
 		Color = args.Color or Color3.fromRGB(0, 255, 0),
 		LerpColor = args.LerpColor or false,
 		GetValue = args.GetValue,
@@ -970,11 +844,6 @@ local function NewBar(args)
 		barDef.MaxWidth = maxW or barDef.MaxWidth
 	end
 
-	function handle.SetLengthClamp(minL, maxL)
-		barDef.MinLength = minL or barDef.MinLength
-		barDef.MaxLength = maxL
-	end
-
 	function handle.SetGroups(groups)
 		barDef.Groups = groups
 	end
@@ -999,7 +868,6 @@ local function unload()
 	end
 	table.clear(Connections)
 
-	-- Collect keys first to avoid mutating the table during iteration
 	local toRemove = {}
 	for instance in pairs(ESPObjects) do
 		table.insert(toRemove, instance)
