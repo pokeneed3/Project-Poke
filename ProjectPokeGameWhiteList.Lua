@@ -1,8 +1,6 @@
-if game.GameId == 9931749389 then
+if game.GameId == 7970033072 then
 	assert(
-		loadstring(
-			game:HttpGet("https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/ProjectPokeDungeonQuest.Lua")
-		)
+		loadstring(game:HttpGet("https://raw.githubusercontent.com/pokeneed3/Project-Poke/main/ProjectPokeTheVeil.Lua"))
 	)()
 elseif game.GameId == 279565647 then
 	assert(

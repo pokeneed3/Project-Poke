@@ -227,7 +227,6 @@ General:AddToggle("Noclip", {
 			end)
 
 			Clip = false
-			task.wait(0.1)
 			NoclipParts = {}
 			Noclipping = RunService.Stepped:Connect(function()
 				if Clip == false and player.Character ~= nil then
@@ -245,7 +244,6 @@ General:AddToggle("Noclip", {
 			end)
 
 			Clip = true
-			task.wait(0.1)
 			for child, _ in pairs(NoclipParts) do
 				if typeof(child) == "Instance" and child:IsA("BasePart") and child.Parent then
 					child.CanCollide = true
