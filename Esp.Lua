@@ -22,7 +22,7 @@ local ESPConfig = {
 
 	-- ABSOLUTE fixed pixel size. The box will ALWAYS be exactly this
 	-- size on screen, at any distance, for any character.
-	-- This is cached on first frame per-target and never re-read.
+	-- This is snapshotted at creation time and can never change.
 	FixedBoxSize = Vector2.new(60, 100),
 
 	CornerLength = 0.25, -- fraction of box side, for "Corners"
@@ -367,15 +367,23 @@ local function createESP(instance, groupOverride)
 	end
 
 	local style = getSetting(target.Group, "BoxStyle")
+
+	-- Snapshot the fixed size and bar dimensions ONCE at creation.
+	-- These are never re-read, so nothing can resize them at runtime.
+	local fixed = getSetting(target.Group, "FixedBoxSize") or Vector2.new(60, 100)
+	local pad = getSetting(target.Group, "Padding") or 0
+
 	local drawings = {
 		Box = makeBoxDrawings(style),
 		Name = Drawing.new("Text"),
 		Bars = {},
 		Target = target,
-		-- Locked dimensions, computed once on first update and never changed.
-		_LockedSize = nil,
-		_LockedBarWidth = nil,
-		_LockedBarLength = nil,
+
+		-- LOCKED FOREVER at creation. Nothing in this script writes
+		-- to these after this point.
+		_LockedSize = Vector2.new(fixed.X + pad * 2, fixed.Y + pad * 2),
+		_LockedBarWidth = getSetting(target.Group, "FixedBarWidth") or 4,
+		_LockedBarLength = getSetting(target.Group, "FixedBarLength"), -- may be nil
 	}
 
 	drawings.Name.Visible = false
@@ -432,13 +440,12 @@ local function isValidCharacter(target)
 end
 
 -- ============================================================
--- Box projection (SIZE IS CACHED, NEVER CHANGES)
+-- Box projection (SIZE IS IMMUTABLE)
 -- ============================================================
 
 -- Projects the target's ROOT POSITION to screen space and returns a
--- FIXED-size box centered on it. The size is read ONCE and cached on
--- the drawings object, so it can NEVER change after creation —
--- regardless of group flips, config edits, padding, or distance.
+-- FIXED-size box centered on it. The size was snapshotted at creation
+-- time and is never derived from distance, FOV, group, or config.
 local function projectBox(root, group, drawings)
 	local pos = root.Position
 	local sp = Camera:WorldToViewportPoint(pos)
@@ -448,13 +455,7 @@ local function projectBox(root, group, drawings)
 		return nil
 	end
 
-	-- Lock the size on first use. Never re-read from config.
-	if not drawings._LockedSize then
-		local fixed = getSetting(group, "FixedBoxSize") or Vector2.new(60, 100)
-		local pad = getSetting(group, "Padding") or 0
-		drawings._LockedSize = Vector2.new(fixed.X + pad * 2, fixed.Y + pad * 2)
-	end
-
+	-- Size is immutable — read the locked values, never recompute.
 	local w = drawings._LockedSize.X
 	local h = drawings._LockedSize.Y
 
@@ -605,7 +606,7 @@ local function updateTarget(instance, drawings)
 	end
 
 	-- Fixed-size box centered on the root's screen position.
-	-- Padding is baked into _LockedSize at lock time.
+	-- Size is immutable; only X/Y change per frame.
 	local minX, minY, maxX, maxY = projectBox(root, group, drawings)
 	if not minX then
 		hideESP(drawings)
@@ -622,18 +623,9 @@ local function updateTarget(instance, drawings)
 		hideBoxDrawings(drawings.Box)
 	end
 
-	-- Bars: thickness and length are LOCKED once, then never change.
+	-- Bars: thickness and length were LOCKED at creation and never change.
 	if getSetting(group, "ShowBars") then
-		-- Lock bar width once.
-		if not drawings._LockedBarWidth then
-			drawings._LockedBarWidth = getSetting(group, "FixedBarWidth") or 4
-		end
 		local fixedBarWidth = drawings._LockedBarWidth
-
-		-- Lock bar length once (nil means "use box dimension").
-		if drawings._LockedBarLength == nil then
-			drawings._LockedBarLength = getSetting(group, "FixedBarLength")
-		end
 		local fixedBarLength = drawings._LockedBarLength
 
 		local leftOffset = 4
