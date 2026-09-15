@@ -703,25 +703,25 @@ local function updateTarget(instance, drawings)
 	end
 
 	-- Bars
-	-- Bars
 	if getSetting(group, "ShowBars") then
 		local leftOffset = 4
 		local rightOffset = 4
 		local bottomOffset = 4
 		local barSpacing = 2
 
-		-- Bars are anchored to the box and match its dimensions:
-		--   Left/Right bars: height = box height
-		--   Bottom bars:     width  = box width
+		-- Fixed pixel size for bars so they don't scale with distance.
+		-- Bars are anchored to the box but keep a constant on-screen size.
 		-- Clamped with the same limits used by projectBox() so a bar can
-		-- never blow up or drift off-screen.
+		-- never blow up or drift off-screen like an unclamped box could.
+		local FIXED_BAR_HEIGHT = 40 -- pixels, vertical bars (Left/Right)
+		local FIXED_BAR_WIDTH = 40 -- pixels, horizontal bars (Bottom)
 		local MIN_BAR_SIZE = 1
 		local MAX_BAR_SIZE = 4000
 		local SCREEN_MARGIN = 2000
 		local vp = Camera.ViewportSize
 
-		local barBoxHeight = math.clamp(height, MIN_BAR_SIZE, MAX_BAR_SIZE)
-		local barBoxWidth = math.clamp(width, MIN_BAR_SIZE, MAX_BAR_SIZE)
+		local barBoxHeight = math.clamp(FIXED_BAR_HEIGHT, MIN_BAR_SIZE, MAX_BAR_SIZE)
+		local barBoxWidth = math.clamp(FIXED_BAR_WIDTH, MIN_BAR_SIZE, MAX_BAR_SIZE)
 
 		local function clampPos(x, y)
 			return math.clamp(x, -SCREEN_MARGIN, vp.X + SCREEN_MARGIN),
