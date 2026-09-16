@@ -54,6 +54,7 @@ local ESPObjects = {}
 local CustomBars = {}
 local GroupClassifiers = {}
 local Connections = {}
+local ModelPartCache = setmetatable({}, { __mode = "k" })
 
 -- ============================================================
 -- Helpers
@@ -444,48 +445,64 @@ end
 -- FIX: compute the bounding box only from the character's own BaseParts,
 -- ignoring tools, accessories with offset welds, effects, etc. This is
 -- what caused the "giant / offset box on some people" bug.
+local function getModelParts(model)
+	local cachedParts = ModelPartCache[model]
+	if cachedParts then
+		return cachedParts
+	end
+
+	local parts = {}
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			local inTool = false
+			local inAccessory = false
+			local parent = descendant.Parent
+			while parent and parent ~= model do
+				if parent:IsA("Tool") then
+					inTool = true
+					break
+				elseif parent:IsA("Accessory") then
+					inAccessory = true
+					break
+				end
+				parent = parent.Parent
+			end
+
+			if not inTool and not inAccessory then
+				table.insert(parts, descendant)
+			end
+		end
+	end
+
+	ModelPartCache[model] = parts
+	return parts
+end
+
 local function computeModelBounds(model)
 	local minV = Vector3.new(math.huge, math.huge, math.huge)
 	local maxV = Vector3.new(-math.huge, -math.huge, -math.huge)
 	local any = false
 
-	for _, d in ipairs(model:GetDescendants()) do
-		if d:IsA("BasePart") then
-			-- Skip parts that belong to Tools or Accessories (held items and
-			-- avatar attachments can distort the box).
-			local inTool = false
-			local inAccessory = false
-			local p = d.Parent
-			while p and p ~= model do
-				if p:IsA("Tool") then
-					inTool = true
-					break
-				elseif p:IsA("Accessory") then
-					inAccessory = true
-					break
-				end
-				p = p.Parent
-			end
-			if not inTool and not inAccessory then
-				any = true
-				local cf = d.CFrame
-				local size = d.Size
-				local half = size * 0.5
-				for sx = -1, 1, 2 do
-					for sy = -1, 1, 2 do
-						for sz = -1, 1, 2 do
-							local corner = cf * Vector3.new(half.X * sx, half.Y * sy, half.Z * sz)
-							minV = Vector3.new(
-								math.min(minV.X, corner.X),
-								math.min(minV.Y, corner.Y),
-								math.min(minV.Z, corner.Z)
-							)
-							maxV = Vector3.new(
-								math.max(maxV.X, corner.X),
-								math.max(maxV.Y, corner.Y),
-								math.max(maxV.Z, corner.Z)
-							)
-						end
+	for _, part in ipairs(getModelParts(model)) do
+		if part.Parent then
+			any = true
+			local cf = part.CFrame
+			local size = part.Size
+			local half = size * 0.5
+			for sx = -1, 1, 2 do
+				for sy = -1, 1, 2 do
+					for sz = -1, 1, 2 do
+						local corner = cf * Vector3.new(half.X * sx, half.Y * sy, half.Z * sz)
+						minV = Vector3.new(
+							math.min(minV.X, corner.X),
+							math.min(minV.Y, corner.Y),
+							math.min(minV.Z, corner.Z)
+						)
+						maxV = Vector3.new(
+							math.max(maxV.X, corner.X),
+							math.max(maxV.Y, corner.Y),
+							math.max(maxV.Z, corner.Z)
+						)
 					end
 				end
 			end
