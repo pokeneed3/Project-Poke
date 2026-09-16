@@ -74,6 +74,44 @@ local Tabs = {
 
 -- Functions
 
+-- Toggle Helper Functions
+
+local TrackedToggles = {}
+local SetToggle
+
+local function TrackToggle(ToggleName: string)
+	if type(ToggleName) ~= "string" then
+		return
+	end
+
+	if not TrackedToggles[ToggleName] then
+		TrackedToggles[ToggleName] = true
+	end
+end
+
+local function UnTrackToggle(ToggleName: string)
+	if type(ToggleName) == "string" then
+		TrackedToggles[ToggleName] = nil
+	end
+end
+
+local function DisableAllTrackedToggles()
+	for ToggleName in pairs(TrackedToggles) do
+		SetToggle(ToggleName, false)
+	end
+end
+
+SetToggle = function(ToggleName: string, v: boolean)
+	if type(ToggleName) ~= "string" then
+		return
+	end
+
+	local Toggle = Toggles[ToggleName]
+	if Toggle then
+		Toggle:SetValue(v)
+	end
+end
+
 -- ============ 2. Track mobs ============
 local watchedFolders = {}
 local watchedInstanceName = {}
@@ -192,6 +230,16 @@ end
 
 -- watchFolder(Workspace:FindFirstChild("NPCs"))  -- add more folders as needed
 
+-- Tracking Toggles that need to be cleaned up
+TrackToggle("Speed")
+TrackToggle("Noclip")
+TrackToggle("InfiniteJump_Toggle")
+TrackToggle("NoFallDmg_Toggle")
+TrackToggle("Remove_Fog")
+TrackToggle("Chat_History")
+TrackToggle("Remove_Shadows")
+TrackToggle("MaxZoom_Toggle")
+
 -------------------------------- Main Tab --------------------------------
 local TabBox = Tabs.Main:AddLeftTabbox()
 local General = TabBox:AddTab("General")
@@ -267,7 +315,7 @@ mt.__newindex = newcclosure(function(self, key, value)
 		NoclipCFrameBlock
 		and key == "CFrame"
 		and self.Name == "HumanoidRootPart"
-		and self:IsDescendantOf(game.Players.LocalPlayer.Character)
+		and self:IsDescendantOf(Players.LocalPlayer.Character)
 	then
 		return
 	end
@@ -351,7 +399,6 @@ General:AddToggle("Noclip", {
 				end
 			end)
 		else
-			NoclipCFrameBlock = false
 			pcall(function()
 				Noclipping:Disconnect()
 			end)
@@ -712,14 +759,18 @@ VisualMods:AddToggle("Remove_Shadows", {
 local MaxZoomDefault = player.CameraMaxZoomDistance
 local CurrentMaxZoom = MaxZoomDefault
 
+local MaxZoomToggleActive = false
+
 VisualMods:AddToggle("MaxZoom_Toggle", {
 	Text = "Max Zoom",
 	Default = false,
 
 	Callback = function(Value)
 		if Value then
+			MaxZoomToggleActive = true
 			player.CameraMaxZoomDistance = CurrentMaxZoom
 		else
+			MaxZoomToggleActive = false
 			player.CameraMaxZoomDistance = MaxZoomDefault
 		end
 	end,
@@ -734,8 +785,10 @@ VisualMods:AddSlider("MaxZoom_Slider", {
 	Compact = false,
 
 	Callback = function(Value)
-		CurrentMaxZoom = Value
-		player.CameraMaxZoomDistance = CurrentMaxZoom
+		if MaxZoomToggleActive then
+			CurrentMaxZoom = Value
+			player.CameraMaxZoomDistance = CurrentMaxZoom
+		end
 	end,
 })
 
@@ -763,21 +816,33 @@ for _, p in ipairs(Players:GetPlayers()) do
 	trackPlayer(p)
 end
 
+local GroupId = 5212858
+
+local ModRoles = {
+	Owner = true,
+	Developer = true,
+	["Junior Moderator"] = true,
+	["Game Tester"] = true,
+	Moderator = true,
+	["Senior Moderator"] = true,
+	["Moderation Lead"] = true,
+	Contractors = true,
+}
+
+local function checkForModerator(player)
+	local success, roleName = pcall(function()
+		return player:GetRoleInGroup(GroupId)
+	end)
+
+	if success and ModRoles[roleName] then
+		Library:Notify(("Mod in game: %s"):format(roleName), 5)
+	end
+end
+
 Players.PlayerAdded:Connect(function(player)
 	trackPlayer(player)
 
-	local groupId = 36025827
-	local ok, roleName = pcall(function()
-		return player:GetRoleInGroup(groupId)
-	end)
-
-	if
-		ok
-		and roleName
-		and (roleName == "Owner" or roleName == "Admin" or roleName == "money tester" or roleName == "Tester")
-	then
-		Library:Notify(("Mod in game: %s"):format(roleName), 5)
-	end
+	checkForModerator(player)
 end)
 
 -- ============ 4. Register bars ============
@@ -832,6 +897,7 @@ Library.KeybindFrame.Visible = true
 Library:OnUnload(function()
 	Library.Unloaded = true
 	disconnectConnections()
+	DisableAllTrackedToggles()
 	if ESP and ESP.Unload then
 		pcall(function()
 			ESP.Unload()

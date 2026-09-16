@@ -451,17 +451,22 @@ local function computeModelBounds(model)
 
 	for _, d in ipairs(model:GetDescendants()) do
 		if d:IsA("BasePart") then
-			-- Skip parts that belong to a Tool (held items distort the box)
+			-- Skip parts that belong to Tools or Accessories (held items and
+			-- avatar attachments can distort the box).
 			local inTool = false
+			local inAccessory = false
 			local p = d.Parent
 			while p and p ~= model do
 				if p:IsA("Tool") then
 					inTool = true
 					break
+				elseif p:IsA("Accessory") then
+					inAccessory = true
+					break
 				end
 				p = p.Parent
 			end
-			if not inTool then
+			if not inTool and not inAccessory then
 				any = true
 				local cf = d.CFrame
 				local size = d.Size
@@ -520,7 +525,7 @@ end
 -- FIX: tighter projection.
 --   - Uses a small margin (viewport + 64px) so a single far-off corner
 --     can't stretch the box across the screen.
---   - Rejects boxes that span both in front of and behind the camera.
+--   - Projects visible corners when a box crosses the camera plane.
 local function projectBox(cf, size)
 	local half = size * 0.5
 	local corners = {
@@ -536,7 +541,7 @@ local function projectBox(cf, size)
 
 	local minX, minY = math.huge, math.huge
 	local maxX, maxY = -math.huge, -math.huge
-	local anyFront, anyBehind = false, false
+	local anyFront = false
 
 	for _, worldPos in ipairs(corners) do
 		local sp = Camera:WorldToViewportPoint(worldPos)
@@ -546,17 +551,10 @@ local function projectBox(cf, size)
 			minY = math.min(minY, sp.Y)
 			maxX = math.max(maxX, sp.X)
 			maxY = math.max(maxY, sp.Y)
-		else
-			anyBehind = true
 		end
 	end
 
 	if not anyFront then
-		return nil
-	end
-
-	-- FIX: if part of the box is behind the camera, projection is garbage.
-	if anyBehind then
 		return nil
 	end
 
@@ -697,7 +695,7 @@ local function updateTarget(instance, drawings)
 		group = drawings.Target.Group
 	end
 
-	local char, root = isValidCharacter(target)
+	local char = isValidCharacter(target)
 	if not char then
 		hideESP(drawings)
 		return

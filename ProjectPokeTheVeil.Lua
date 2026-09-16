@@ -553,7 +553,7 @@ for _, p in ipairs(Players:GetPlayers()) do
 end
 
 Players.PlayerAdded:Connect(function(player)
-	trackPlayer()
+	trackPlayer(player)
 
 	local groupId = 36025827
 
