@@ -1,5 +1,6 @@
 -- Services
 local Lighting = cloneref(game:GetService("Lighting"))
+local CoreGui = cloneref(game:GetService("CoreGui"))
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = cloneref(game:GetService("ReplicatedStorage"))
@@ -37,7 +38,7 @@ local ESPGroups = ESPConfig.Groups or {}
 ESPConfig.Groups = ESPGroups
 ESPConfig.BarColor = ESPConfig.BarColor or Color3.fromRGB(0, 255, 0)
 ESPGroups.Player = ESPGroups.Player or {}
-ESPGroups.Monster = ESPGroups.Monster or {}
+ESPGroups.Mob = ESPGroups.Mob or {}
 ESPGroups.NPC = ESPGroups.NPC or {}
 ESPGroups.Drop = ESPGroups.Drop or {}
 ESPGroups.Chest = ESPGroups.Chest or {}
@@ -46,7 +47,18 @@ ESPGroups.Player.ShowName = true
 ESPGroups.Player.ShowDistance = true
 ESPGroups.Player.ShowBars = true
 
-ESPConfig.ShowBars = false
+ESPGroups.NPC.ShowName = true
+ESPGroups.NPC.ShowDistance = true
+
+ESPGroups.Mob.ShowName = true
+ESPGroups.Mob.ShowDistance = true
+ESPGroups.Chest.ShowName = true
+ESPGroups.Chest.ShowDistance = true
+
+ESPGroups.Mob.ShowName = true
+ESPGroups.Mob.ShowDistance = true
+ESPGroups.Mob.ShowBox = false
+ESPGroups.Mob.ShowBars = false
 
 ESPGroups.NPC.ShowBars = false
 ESPGroups.NPC.ShowBox = false
@@ -239,6 +251,7 @@ TrackToggle("Remove_Fog")
 TrackToggle("Chat_History")
 TrackToggle("Remove_Shadows")
 TrackToggle("MaxZoom_Toggle")
+TrackToggle("LeaderboardSpectate_Toggle")
 
 -------------------------------- Main Tab --------------------------------
 local TabBox = Tabs.Main:AddLeftTabbox()
@@ -268,15 +281,35 @@ General:AddToggle("Speed", {
 					end
 
 					local dir = humanoid.MoveDirection
+					local speed = humanoid.WalkSpeed + Speed
+					local current = root.AssemblyLinearVelocity
 					if dir.Magnitude > 0 then
-						local speed = humanoid.WalkSpeed + Speed
-						local current = root.AssemblyLinearVelocity
 						root.AssemblyLinearVelocity = Vector3.new(dir.X * speed, current.Y, dir.Z * speed)
+					else
+						root.AssemblyLinearVelocity = Vector3.new(0, current.Y, 0)
 					end
 				end)
 			end)
 		else
 			if SpeedConnection then
+				local player = Players.LocalPlayer
+				local character = player.Character
+
+				if not character then
+					return
+				end
+
+				local humanoid = character:FindFirstChildOfClass("Humanoid")
+				local root = character:FindFirstChild("HumanoidRootPart")
+
+				if not humanoid or not root or humanoid.Health <= 0 then
+					return
+				end
+
+				local current = root.AssemblyLinearVelocity
+
+				root.AssemblyLinearVelocity = Vector3.new(0, current.Y, 0)
+
 				SpeedConnection:Disconnect()
 				SpeedConnection = nil
 			end
@@ -595,7 +628,7 @@ local function addGroupToggle(groupName, key, label)
 	end
 end
 
-for _, groupName in ipairs({ "Player", "Monster", "NPC", "Drop", "Chest" }) do
+for _, groupName in ipairs({ "Player", "Mob", "NPC", "Drop", "Chest" }) do
 	addGroupToggle(groupName, "ShowName", "Name")
 	addGroupToggle(groupName, "ShowDistance", "Distance")
 	if groupName == "NPC" or groupName == "Drop" or groupName == "Chest" then
@@ -616,30 +649,12 @@ TempStorageVisualTabBoxMain:AddToggle("ESP_Enabled", {
 	end,
 })
 
--- Name Toggle with Text Colorpicker attached
-TempStorageVisualTabBoxMain:AddToggle("ESP_ShowName", {
-	Text = "Show Name",
-	Default = ESPConfig.ShowName == nil and true or ESPConfig.ShowName,
-	Callback = function(Value)
-		ESPConfig.ShowName = Value
-	end,
-})
-
 -- Display Name Toggle
 TempStorageVisualTabBoxMain:AddToggle("ESP_DisplayName", {
 	Text = "Use Display Name",
 	Default = ESPConfig.UseDisplayName or true,
 	Callback = function(Value)
 		ESPConfig.UseDisplayName = Value
-	end,
-})
-
--- Health % Toggle
-TempStorageVisualTabBoxMain:AddToggle("ESP_ShowBars", {
-	Text = "Show Health Bars",
-	Default = ESPConfig.ShowBars,
-	Callback = function(Value)
-		ESPConfig.ShowBars = Value
 	end,
 })
 
@@ -662,7 +677,7 @@ TempStorageVisualTabBoxMain:AddToggle("Mob_ESP", {
 	Callback = function(Value)
 		local folder = workspace:FindFirstChild("Live") -- <-- change me
 		if Value then
-			watchFolderPredicate(folder, "Monster", isMob)
+			watchFolderPredicate(folder, "Mob", isMob)
 		else
 			unwatchFolder(folder)
 		end
@@ -788,6 +803,180 @@ VisualMods:AddSlider("MaxZoom_Slider", {
 		if MaxZoomToggleActive then
 			CurrentMaxZoom = Value
 			player.CameraMaxZoomDistance = CurrentMaxZoom
+		end
+	end,
+})
+
+local ScrollingFrame = player.PlayerGui.LeaderboardGui.MainFrame.ScrollingFrame
+
+local leaderboardspectateLoops = {}
+local currentSpectateLoop
+local currentSpectateLabel
+local currentSpectateName
+local ListenForHealthChangeConnection
+
+local function extractUsername(text)
+	local username = text:match("^(.-)%s*%(") or text
+	return username
+end
+
+local function findCharacterByLabelText(text)
+	local username = extractUsername(text)
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr.Name == username then
+			return plr.Character
+		end
+	end
+	return nil
+end
+
+local function setupClick(label)
+	local connection = label.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			local spectateName = label.Text
+
+			if spectateName == currentSpectateName then
+				if currentSpectateLoop then
+					currentSpectateLoop:Disconnect()
+					currentSpectateLoop = nil
+				end
+				if currentSpectateLabel then
+					currentSpectateLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+					currentSpectateLabel = nil
+				end
+				currentSpectateName = nil
+				return
+			end
+
+			if currentSpectateLabel then
+				currentSpectateLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+			end
+
+			if currentSpectateLoop then
+				currentSpectateLoop:Disconnect()
+				currentSpectateLoop = nil
+			end
+
+			if ListenForHealthChangeConnection then
+				ListenForHealthChangeConnection:Disconnect()
+				ListenForHealthChangeConnection = nil
+			end
+
+			if spectateName == player.Character.Name then
+				if currentSpectateLabel then
+					currentSpectateLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+				end
+
+				if currentSpectateLoop then
+					currentSpectateLoop:Disconnect()
+					currentSpectateLoop = nil
+				end
+				return
+			end
+
+			if
+				not findCharacterByLabelText(spectateName)
+				or not findCharacterByLabelText(spectateName):FindFirstChild("Humanoid")
+			then
+				Library:Notify(`{findCharacterByLabelText(spectateName)} doesnt have a valid Character or Humanoid`)
+
+				if currentSpectateLabel then
+					currentSpectateLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+				end
+
+				return
+			end
+
+			label.TextColor3 = Color3.fromRGB(111, 0, 255)
+			currentSpectateLabel = label
+			currentSpectateName = spectateName
+
+			local humanoid = player.Character:FindFirstChild("Humanoid")
+
+			if humanoid then
+				local previousHealth = humanoid.Health
+
+				ListenForHealthChangeConnection = humanoid.HealthChanged:Connect(function(newHealth)
+					if newHealth < previousHealth then
+						if currentSpectateLoop then
+							if currentSpectateLabel then
+								currentSpectateLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+							end
+
+							currentSpectateLoop:Disconnect()
+							currentSpectateLoop = nil
+						end
+					end
+					previousHealth = newHealth
+				end)
+			end
+
+			currentSpectateLoop = RunService.Heartbeat:Connect(function()
+				local character = findCharacterByLabelText(spectateName)
+				local humanoid = character and character:FindFirstChild("Humanoid")
+
+				if not character or not humanoid then
+					if currentSpectateLabel then
+						currentSpectateLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+					end
+
+					currentSpectateLoop:Disconnect()
+					currentSpectateLoop = nil
+
+					Library:Notify(`{findCharacterByLabelText(spectateName)} doesnt have a valid Character or Humanoid`)
+
+					return
+				end
+
+				if humanoid then
+					workspace.CurrentCamera.CameraSubject = humanoid
+				end
+			end)
+		end
+	end)
+
+	table.insert(leaderboardspectateLoops, connection)
+end
+
+local function disconnectAllLeaderboardSpectateLoops()
+	for _, connection in ipairs(leaderboardspectateLoops) do
+		connection:Disconnect()
+	end
+	table.clear(leaderboardspectateLoops)
+
+	if currentSpectateLoop then
+		currentSpectateLoop:Disconnect()
+		currentSpectateLoop = nil
+	end
+
+	if currentSpectateLabel then
+		currentSpectateLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+		currentSpectateLabel = nil
+	end
+
+	currentSpectateName = nil
+end
+
+VisualMods:AddToggle("LeaderboardSpectate_Toggle", {
+	Text = "Leaderboard Spectate",
+	Default = false,
+
+	Callback = function(Value)
+		if Value then
+			local TextLabelConnection = ScrollingFrame.DescendantAdded:Connect(function(desc)
+				if desc.Name == "Player" and desc:IsA("TextLabel") then
+					setupClick(desc)
+				end
+			end)
+			table.insert(leaderboardspectateLoops, TextLabelConnection)
+
+			for _, desc in ipairs(ScrollingFrame:GetDescendants()) do
+				if desc.Name == "Player" and desc:IsA("TextLabel") then
+					setupClick(desc)
+				end
+			end
+		else
+			disconnectAllLeaderboardSpectateLoops()
 		end
 	end,
 })
@@ -923,7 +1112,7 @@ MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", {
 
 -- Library:Notify("hello")
 Library.ToggleKeybind = Options.MenuKeybind
-SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
+--SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
 SaveManager:IgnoreThemeSettings()
