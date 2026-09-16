@@ -938,6 +938,7 @@ local renderConnection = RunService.RenderStepped:Connect(function(deltaTime)
 		return
 	end
 	elapsed = 0
+
 	if not ESPConfig.Enabled then
 		for _, drawings in pairs(ESPObjects) do
 			hideESP(drawings)
