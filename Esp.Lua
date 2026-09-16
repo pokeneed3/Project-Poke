@@ -541,12 +541,12 @@ local function projectBox(cf, size)
 
 	local minX, minY = math.huge, math.huge
 	local maxX, maxY = -math.huge, -math.huge
-	local anyFront = false
+	local frontCount = 0
 
 	for _, worldPos in ipairs(corners) do
 		local sp = Camera:WorldToViewportPoint(worldPos)
 		if sp.Z > 0 then
-			anyFront = true
+			frontCount = frontCount + 1
 			minX = math.min(minX, sp.X)
 			minY = math.min(minY, sp.Y)
 			maxX = math.max(maxX, sp.X)
@@ -554,15 +554,31 @@ local function projectBox(cf, size)
 		end
 	end
 
-	if not anyFront then
-		return nil
+	if frontCount == 0 then
+		local centerPoint = Camera:WorldToViewportPoint(cf.Position)
+		if centerPoint.Z <= 0 then
+			return nil
+		end
+
+		local topPoint = Camera:WorldToViewportPoint(cf.Position + Vector3.new(0, half.Y, 0))
+		local rightPoint = Camera:WorldToViewportPoint(cf.Position + Vector3.new(half.X, 0, 0))
+		local fallbackHeight = math.abs(centerPoint.Y - topPoint.Y) * 2
+		local fallbackWidth = math.abs(centerPoint.X - rightPoint.X) * 2
+		if fallbackWidth < 1 or fallbackHeight < 1 then
+			return nil
+		end
+
+		return centerPoint.X - fallbackWidth * 0.5,
+			centerPoint.Y - fallbackHeight * 0.5,
+			centerPoint.X + fallbackWidth * 0.5,
+			centerPoint.Y + fallbackHeight * 0.5
 	end
 
 	local w = maxX - minX
 	local h = maxY - minY
 
-	-- Reject degenerate projections
-	if w < 1 or h < 1 then
+	-- Keep distant targets visible instead of dropping sub-pixel boxes.
+	if w <= 0 or h <= 0 then
 		return nil
 	end
 

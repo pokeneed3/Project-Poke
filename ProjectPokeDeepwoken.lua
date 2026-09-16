@@ -561,7 +561,7 @@ local function addGroupToggle(groupName, key, label)
 
 	local defaultValue = config[key]
 	if defaultValue == nil then
-		defaultValue = false
+		defaultValue = ESPConfig[key]
 	end
 	config[key] = defaultValue
 
