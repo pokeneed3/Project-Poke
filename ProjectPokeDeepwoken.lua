@@ -37,6 +37,7 @@ local ESPConfig = ESP.Config
 local ESPGroups = ESPConfig.Groups or {}
 ESPConfig.Groups = ESPGroups
 ESPConfig.BarColor = ESPConfig.BarColor or Color3.fromRGB(0, 255, 0)
+ESPConfig.MaxDistance = ESPConfig.MaxDistance or 10000
 ESPGroups.Player = ESPGroups.Player or {}
 ESPGroups.Mob = ESPGroups.Mob or {}
 ESPGroups.NPC = ESPGroups.NPC or {}
@@ -121,6 +122,12 @@ SetToggle = function(ToggleName: string, v: boolean)
 	local Toggle = Toggles[ToggleName]
 	if Toggle then
 		Toggle:SetValue(v)
+	end
+end
+
+local function trackPlayer(player)
+	if player ~= Players.LocalPlayer then
+		ESP.Track(player, "Player")
 	end
 end
 
@@ -649,6 +656,74 @@ TempStorageVisualTabBoxMain:AddToggle("ESP_Enabled", {
 	end,
 })
 
+local playerESPEnabled = true
+local playerConnectionList = {}
+
+local function enablePlayerESP()
+	if playerESPEnabled then
+		return
+	end
+
+	playerESPEnabled = true
+
+	for _, p in ipairs(Players:GetPlayers()) do
+		trackPlayer(p)
+	end
+
+	table.insert(
+		playerConnectionList,
+		Players.PlayerAdded:Connect(function(player)
+			if playerESPEnabled and player ~= Players.LocalPlayer then
+				ESP.Track(player, "Player")
+			end
+		end)
+	)
+end
+
+local function disablePlayerESP()
+	if not playerESPEnabled then
+		return
+	end
+
+	playerESPEnabled = false
+
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= Players.LocalPlayer then
+			ESP.Untrack(p)
+		end
+	end
+
+	for _, conn in ipairs(playerConnectionList) do
+		conn:Disconnect()
+	end
+	table.clear(playerConnectionList)
+end
+
+TempStorageVisualTabBoxMain:AddToggle("Player_ESP", {
+	Text = "Player Esp",
+	Default = true,
+	Callback = function(Value)
+		if Value then
+			enablePlayerESP()
+		else
+			disablePlayerESP()
+		end
+	end,
+})
+
+TempStorageVisualTabBoxMain:AddSlider("PlayerMaxDistance_Slider", {
+	Text = "Max Distance",
+	Default = 5000,
+	Min = 100,
+	Max = 50000,
+	Rounding = 0,
+	Compact = false,
+
+	Callback = function(Value)
+		ESPGroups.Player.MaxDistance = Value
+	end,
+})
+
 -- Display Name Toggle
 TempStorageVisualTabBoxMain:AddToggle("ESP_DisplayName", {
 	Text = "Use Display Name",
@@ -675,12 +750,25 @@ TempStorageVisualTabBoxMain:AddToggle("Mob_ESP", {
 	Text = "Mob Esp",
 	Default = false,
 	Callback = function(Value)
-		local folder = workspace:FindFirstChild("Live") -- <-- change me
+		local folder = workspace:FindFirstChild("Live")
 		if Value then
 			watchFolderPredicate(folder, "Mob", isMob)
 		else
 			unwatchFolder(folder)
 		end
+	end,
+})
+
+TempStorageVisualTabBoxMain:AddSlider("MobMaxDistance_Slider", {
+	Text = "Max Distance",
+	Default = 5000,
+	Min = 100,
+	Max = 50000,
+	Rounding = 0,
+	Compact = false,
+
+	Callback = function(Value)
+		ESPGroups.Mob.MaxDistance = Value
 	end,
 })
 
@@ -697,6 +785,19 @@ TempStorageVisualTabBoxMain:AddToggle("NPC_ESP", {
 	end,
 })
 
+TempStorageVisualTabBoxMain:AddSlider("NPCMaxDistance_Slider", {
+	Text = "Max Distance",
+	Default = 5000,
+	Min = 100,
+	Max = 50000,
+	Rounding = 0,
+	Compact = false,
+
+	Callback = function(Value)
+		ESPGroups.NPC.MaxDistance = Value
+	end,
+})
+
 TempStorageVisualTabBoxMain:AddToggle("Drop_Esp", {
 	Text = "Drop Esp",
 	Default = false,
@@ -710,6 +811,19 @@ TempStorageVisualTabBoxMain:AddToggle("Drop_Esp", {
 	end,
 })
 
+TempStorageVisualTabBoxMain:AddSlider("DropMaxDistance_Slider", {
+	Text = "Max Distance",
+	Default = 5000,
+	Min = 100,
+	Max = 50000,
+	Rounding = 0,
+	Compact = false,
+
+	Callback = function(Value)
+		ESPGroups.Drop.MaxDistance = Value
+	end,
+})
+
 TempStorageVisualTabBoxMain:AddToggle("Chest_ESP", {
 	Text = "Chest Esp",
 	Default = false,
@@ -719,6 +833,19 @@ TempStorageVisualTabBoxMain:AddToggle("Chest_ESP", {
 		else
 			unwatchInstanceName("Chest")
 		end
+	end,
+})
+
+TempStorageVisualTabBoxMain:AddSlider("ChestMaxDistance_Slider", {
+	Text = "Max Distance",
+	Default = 5000,
+	Min = 100,
+	Max = 50000,
+	Rounding = 0,
+	Compact = false,
+
+	Callback = function(Value)
+		ESPGroups.Chest.MaxDistance = Value
 	end,
 })
 
@@ -995,11 +1122,6 @@ ESP:NewBar({
 ]]
 
 -- ============ 1. Track players ============
-local function trackPlayer(player)
-	if player ~= Players.LocalPlayer then
-		ESP.Track(player, "Player")
-	end
-end
 
 for _, p in ipairs(Players:GetPlayers()) do
 	trackPlayer(p)

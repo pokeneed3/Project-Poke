@@ -711,8 +711,15 @@ local function updateTarget(instance, drawings)
 		group = drawings.Target.Group
 	end
 
-	local char = isValidCharacter(target)
+	local char, root = isValidCharacter(target)
 	if not char then
+		hideESP(drawings)
+		return
+	end
+
+	-- Reject distant targets before the expensive bounding-box calculation.
+	local maxDist = getSetting(group, "MaxDistance")
+	if maxDist and (Camera.CFrame.Position - root.Position).Magnitude > maxDist then
 		hideESP(drawings)
 		return
 	end
@@ -728,12 +735,6 @@ local function updateTarget(instance, drawings)
 
 	local boxCenter = cf.Position
 	local distance = (Camera.CFrame.Position - boxCenter).Magnitude
-
-	local maxDist = getSetting(group, "MaxDistance")
-	if maxDist and distance > maxDist then
-		hideESP(drawings)
-		return
-	end
 
 	-- FIX: use configurable MinDistance instead of hardcoded 4, and
 	-- check against the box center so it's stable per-target.
