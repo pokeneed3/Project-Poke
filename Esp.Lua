@@ -929,8 +929,15 @@ end
 -- ============================================================
 -- Render loop
 -- ============================================================
+local updateInterval = 1 / 30
+local elapsed = 0
 
-local renderConnection = RunService.RenderStepped:Connect(function()
+local renderConnection = RunService.RenderStepped:Connect(function(deltaTime)
+	elapsed += deltaTime
+	if elapsed < updateInterval then
+		return
+	end
+	elapsed = 0
 	if not ESPConfig.Enabled then
 		for _, drawings in pairs(ESPObjects) do
 			hideESP(drawings)
