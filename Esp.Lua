@@ -27,15 +27,19 @@ local ESPConfig = {
 	ShowDistance = true,
 	UseDisplayName = true,
 	ShowBars = true,
-	BarColor = nil, -- nil = use per-bar Color / LerpColor
+
+	-- Global bar color override. When set, overrides every bar's Color.
+	-- Per-group BarColor (Groups[group].BarColor) still wins over this.
+	BarColor = nil,
+
 	OcclusionCheck = false, -- raycast from camera to root
 	Padding = 0, -- extra pixels around box
 
-	-- FIX: lowered default. 6 studs was hiding ESP constantly in
+	-- Lowered default. 6 studs was hiding ESP constantly in
 	-- close-quarters situations, causing severe flicker.
 	MinDistance = 0,
 
-	-- FIX: number of consecutive failed frames before we actually hide
+	-- Number of consecutive failed frames before we actually hide
 	-- a target. Prevents single-frame hiccups (streaming, respawn,
 	-- projection edge cases) from causing visible flicker.
 	FailGraceFrames = 3,
@@ -97,9 +101,17 @@ local function safeDestroy(drawing)
 	end
 end
 
+-- FIX: For Players, classify against their Character (so predicates
+-- written for Models/Characters actually match). Falls back to the
+-- Player itself when no character exists yet.
 local function resolveGroup(instance)
+	local subject = instance
+	if instance:IsA("Player") then
+		subject = instance.Character or instance
+	end
+
 	for _, classifier in ipairs(GroupClassifiers) do
-		local ok, matches = pcall(classifier.Predicate, instance)
+		local ok, matches = pcall(classifier.Predicate, subject)
 		if ok and matches then
 			return classifier.Name
 		elseif not ok then
@@ -270,7 +282,7 @@ end
 -- ============================================================
 
 local function makeBoxDrawings(style)
-	style = style or "Square" -- FIX: never allow nil style
+	style = style or "Square" -- never allow nil style
 	local d = { Style = style }
 	if style == "Corners" then
 		d.TopLeftH = Drawing.new("Line")
@@ -368,14 +380,14 @@ local function createESP(instance, groupOverride)
 		return
 	end
 
-	-- FIX: ensure style is never nil so we don't rebuild the box each frame
+	-- Ensure style is never nil so we don't rebuild the box each frame
 	local style = getSetting(target.Group, "BoxStyle") or "Square"
 	local drawings = {
 		Box = makeBoxDrawings(style),
 		Name = Drawing.new("Text"),
 		Bars = {},
 		Target = target,
-		FailCount = 0, -- FIX: grace-frame counter
+		FailCount = 0, -- grace-frame counter
 	}
 
 	drawings.Name.Visible = false
@@ -414,7 +426,7 @@ end
 -- Validity + bounding box
 -- ============================================================
 
--- FIX: relaxed validity checks. We no longer require the root part
+-- Relaxed validity checks. We no longer require the root part
 -- during transient streaming/respawn frames, and we don't reject on
 -- Health <= 0 alone (death animation flickers otherwise).
 -- Returns: model, root, humanoid
@@ -428,7 +440,7 @@ local function isValidCharacter(target)
 	local root = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
 
 	if humanoid then
-		-- FIX: only bail on dead humanoids when there is truly no root.
+		-- Only bail on dead humanoids when there is truly no root.
 		-- During the death anim the character is still parented, and
 		-- hiding/re-showing caused flicker.
 		if not root then
@@ -524,8 +536,8 @@ local function getWorldBoundingBox(model)
 end
 
 -- Project a world-space box to screen space.
--- FIX: much more permissive thresholds so brief off-screen / far-away
--- targets don't vanish for a frame.
+-- Permissive thresholds so brief off-screen / far-away targets
+-- don't vanish for a frame.
 local function projectBox(cf, size)
 	local half = size * 0.5
 	local corners = {
@@ -561,8 +573,6 @@ local function projectBox(cf, size)
 	local w = maxX - minX
 	local h = maxY - minY
 
-	-- FIX: lowered from 1 -> 0.5 and raised upper bound from 4000 -> 10000.
-	-- The old thresholds rejected valid projections every few frames.
 	if w < 0.5 or h < 0.5 then
 		return nil
 	end
@@ -571,14 +581,21 @@ local function projectBox(cf, size)
 		return nil
 	end
 
-	-- FIX: clamp with a slightly larger margin so a target isn't
-	-- dropped purely because it slid just off-screen.
+	-- Clamp with a margin so a target isn't dropped purely because
+	-- it slid just off-screen.
 	local vp = Camera.ViewportSize
 	local margin = 128
 	minX = math.clamp(minX, -margin, vp.X + margin)
 	maxX = math.clamp(maxX, -margin, vp.X + margin)
 	minY = math.clamp(minY, -margin, vp.Y + margin)
 	maxY = math.clamp(maxY, -margin, vp.Y + margin)
+
+	-- FIX: after clamping, both edges can collapse onto the same
+	-- coordinate (target fully off-screen in one axis). Reject
+	-- instead of drawing a 1px sliver at the screen edge.
+	if (maxX - minX) < 0.5 or (maxY - minY) < 0.5 then
+		return nil
+	end
 
 	return minX, minY, maxX, maxY
 end
@@ -818,9 +835,15 @@ local function updateTarget(instance, drawings)
 					barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
 				end
 
+				-- Color resolution order:
+				--   Groups[group].BarColor -> ESPConfig.BarColor
+				--   -> per-bar LerpColor -> per-bar Color
 				local groupBarColor = ESPConfig.Groups[group] and ESPConfig.Groups[group].BarColor
+				local globalBarColor = ESPConfig.BarColor
 				if groupBarColor then
 					barDrawings.Fill.Color = groupBarColor
+				elseif globalBarColor then
+					barDrawings.Fill.Color = globalBarColor
 				elseif barDef.LerpColor then
 					barDrawings.Fill.Color = Color3.fromRGB(255, 0, 0):Lerp(Color3.fromRGB(0, 255, 0), ratio)
 				else
@@ -913,6 +936,11 @@ local renderConnection = RunService.RenderStepped:Connect(function()
 			drawings.FailCount = (drawings.FailCount or 0) + 1
 			if drawings.FailCount > grace then
 				hideESP(drawings)
+				-- FIX: reset the counter after hiding so a target that
+				-- comes back later gets the full grace window again.
+				-- Previously this grew unbounded, causing instant hide
+				-- on the first failed frame after a long absence.
+				drawings.FailCount = 0
 			end
 		end
 	end
@@ -977,7 +1005,6 @@ local function NewBar(args)
 				drawings.Bars[barDef.Name] = nil
 			end
 		end
-		handle.Removed = true
 	end
 
 	function handle.SetColor(color)
