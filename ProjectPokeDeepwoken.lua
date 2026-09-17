@@ -45,12 +45,14 @@ ESPGroups.Drop = ESPGroups.Drop or {}
 ESPGroups.Chest = ESPGroups.Chest or {}
 
 ESPGroups.Player.ShowName = true
+ESPGroups.Player.ShowHealthPercentage = true
 ESPGroups.Player.ShowDistance = true
 ESPGroups.Player.ShowBars = true
 
 ESPGroups.NPC.ShowName = true
 ESPGroups.NPC.ShowDistance = true
 
+ESPGroups.Mob.ShowHealthPercentage = true
 ESPGroups.Mob.ShowName = true
 ESPGroups.Mob.ShowDistance = true
 ESPGroups.Chest.ShowName = true
@@ -721,6 +723,16 @@ TempStorageVisualTabBoxMain:AddSlider("PlayerMaxDistance_Slider", {
 
 	Callback = function(Value)
 		ESPGroups.Player.MaxDistance = Value
+	end,
+})
+
+TempStorageVisualTabBoxMain:AddToggle("ESP_HealthPercent", {
+	Text = "Health Percentage",
+	Default = false,
+	Callback = function(value)
+		for _, groupConfig in pairs(ESPGroups) do
+			groupConfig.ShowHealthPercentage = value
+		end
 	end,
 })
 

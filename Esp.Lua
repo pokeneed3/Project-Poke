@@ -25,6 +25,7 @@ local ESPConfig = {
 	ShowBox = true,
 	ShowName = true,
 	ShowDistance = true,
+	ShowHealthPercentage = true,
 	UseDisplayName = true,
 	ShowBars = true,
 	BarColor = nil, -- nil = use per-bar Color / LerpColor
@@ -889,8 +890,9 @@ local function updateTarget(instance, drawings)
 	-- Text label
 	local showName = getSetting(group, "ShowName")
 	local showDist = getSetting(group, "ShowDistance")
+	local showHealth = getSetting(group, "ShowHealthPercentage")
 
-	if showName or showDist then
+	if showName or showDist or showHealth then
 		local finalText
 
 		if ESPConfig.FormatText then
@@ -905,9 +907,19 @@ local function updateTarget(instance, drawings)
 			if showName then
 				table.insert(parts, target.GetName())
 			end
+
 			if showDist then
 				table.insert(parts, "[" .. math.floor(distance) .. "m]")
 			end
+
+			if showHealth then
+				local humanoid = char:FindFirstChildOfClass("Humanoid")
+				if humanoid and humanoid.MaxHealth > 0 then
+					local healthPercent = math.floor((humanoid.Health / humanoid.MaxHealth) * 100)
+					table.insert(parts, "[" .. healthPercent .. "%]")
+				end
+			end
+
 			finalText = table.concat(parts, " ")
 		end
 
