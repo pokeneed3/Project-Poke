@@ -800,10 +800,13 @@ local function updateTarget(instance, drawings)
 	maxX = maxX + pad
 	maxY = maxY + pad
 
-	local boxX, boxY = minX, minY
-
-	local width = 60
-	local height = 90
+	-- Keep the box dimensions fixed in screen pixels; perspective only controls position.
+	local FIXED_BOX_WIDTH, FIXED_BOX_HEIGHT = 60, 90
+	local width, height = FIXED_BOX_WIDTH, FIXED_BOX_HEIGHT
+	local boxCenterX = (minX + maxX) * 0.5
+	local boxCenterY = (minY + maxY) * 0.5
+	local boxX = boxCenterX - width * 0.5
+	local boxY = boxCenterY - height * 0.5
 
 	-- Box
 	if getSetting(group, "ShowBox") then
