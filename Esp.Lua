@@ -915,7 +915,6 @@ local function updateTarget(instance, drawings)
 			if showHealth then
 				local humanoid = char:FindFirstChildOfClass("Humanoid")
 				if humanoid and humanoid.MaxHealth > 0 then
-					print("hello")
 					local healthPercent = math.floor((humanoid.Health / humanoid.MaxHealth) * 100)
 					table.insert(parts, "[" .. healthPercent .. "%]")
 				end
