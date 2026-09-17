@@ -36,6 +36,7 @@ local ESPConfig = ESP.Config
 -- Group overrides are optional. Values set here override ESPConfig globals.
 local ESPGroups = ESPConfig.Groups or {}
 ESPConfig.Groups = ESPGroups
+ESPConfig.ShowHealthPercentage = ESPConfig.ShowHealthPercentage
 ESPConfig.BarColor = ESPConfig.BarColor or Color3.fromRGB(0, 255, 0)
 ESPConfig.MaxDistance = ESPConfig.MaxDistance or 10000
 ESPGroups.Player = ESPGroups.Player or {}
@@ -728,11 +729,12 @@ TempStorageVisualTabBoxMain:AddSlider("PlayerMaxDistance_Slider", {
 
 TempStorageVisualTabBoxMain:AddToggle("ESP_HealthPercent", {
 	Text = "Health Percentage",
-	Default = false,
+	Default = ESPConfig.ShowHealthPercentage,
 	Callback = function(value)
 		for _, groupConfig in pairs(ESPGroups) do
 			groupConfig.ShowHealthPercentage = value
 		end
+		ESPConfig.ShowHealthPercentage = value
 	end,
 })
 
