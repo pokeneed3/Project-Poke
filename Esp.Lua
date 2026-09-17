@@ -1,4 +1,4 @@
-print("hello")
+print("hello1")
 -- Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -707,16 +707,28 @@ local function updateTarget(instance, drawings)
 		end
 	end
 
-	-- SINGLE projected anchor point. No corner projection. No size math.
+	-- Project the center to check if on screen
 	local screenPoint, onScreen = Camera:WorldToViewportPoint(boxCenter)
 	if not onScreen or screenPoint.Z <= 0 then
 		hideESP(drawings)
 		return
 	end
 
-	-- Hard-locked size. Nothing below this line can change width/height.
-	local width = FIXED_BOX_WIDTH
-	local height = FIXED_BOX_HEIGHT
+	-- Calculate the top and bottom of the character's bounding box in 3D space
+	local top3D = boxCenter + Vector3.new(0, size.Y / 2, 0)
+	local bottom3D = boxCenter - Vector3.new(0, size.Y / 2, 0)
+
+	-- Project top and bottom points to the 2D screen
+	local top2D = Camera:WorldToViewportPoint(top3D)
+	local bottom2D = Camera:WorldToViewportPoint(bottom3D)
+
+	-- Calculate dynamic height based on the 2D distance between top and bottom
+	local height = math.abs(bottom2D.Y - top2D.Y)
+
+	-- Width is typically proportional to height for humanoid characters (e.g., half the height)
+	-- Or you can project the left/right bounds if you want exact width.
+	local width = height * 0.6
+
 	local boxCenterX = screenPoint.X
 	local boxCenterY = screenPoint.Y
 	local boxX = boxCenterX - width * 0.5
