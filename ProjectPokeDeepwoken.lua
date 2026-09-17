@@ -137,77 +137,84 @@ local function trackPlayer(player)
 	end
 end
 
--- ============ 2. Track mobs ============
+-- Storage for active watchers
 local watchedFolders = {}
 local watchedInstanceName = {}
 
-local function watchInstanceName(Instancename, groupName)
-	if not Instancename then
+-- Helper function to apply custom attribute to ESP text
+local function applyMobAttribute(instance, attributeName)
+	if not instance or not instance:IsA("Model") then
 		return
 	end
 
-	if watchedInstanceName[Instancename] then
+	-- Function to update the ESPName attribute
+	local function updateName()
+		local attrValue = instance:GetAttribute(attributeName)
+		if attrValue then
+			instance:SetAttribute("ESPName", tostring(attrValue))
+		else
+			-- Fallback if attribute is nil (e.g., MobName (Level 5))
+			local nameAttr = instance:GetAttribute("MobName") or instance:GetAttribute("DisplayName")
+			local levelAttr = instance:GetAttribute("Level")
+
+			if nameAttr and levelAttr then
+				instance:SetAttribute("ESPName", string.format("%s [Lvl %s]", tostring(nameAttr), tostring(levelAttr)))
+			elseif nameAttr then
+				instance:SetAttribute("ESPName", tostring(nameAttr))
+			end
+		end
+	end
+
+	-- Apply immediately
+	updateName()
+
+	-- Listen for attribute updates (in case mob stats/name load asynchronously)
+	local attributeConnection = instance.AttributeChanged:Connect(function(changedAttr)
+		if changedAttr == attributeName or changedAttr == "MobName" or changedAttr == "Level" then
+			updateName()
+		end
+	end)
+
+	return attributeConnection
+end
+
+-- Refactored watchFolderPredicate with Attribute support
+local function watchFolderPredicate(folder, groupName, predicate, targetAttributeName)
+	if not folder or watchedFolders[folder] then
 		return
 	end
 
-	for _, m in ipairs(workspace:GetDescendants()) do
-		if m.Name == Instancename then
+	local attrConnections = {}
+
+	local function tryTrack(m)
+		if not predicate or predicate(m) then
+			-- Extract and assign attribute before tracking
+			if targetAttributeName then
+				local conn = applyMobAttribute(m, targetAttributeName)
+				if conn then
+					attrConnections[m] = conn
+				end
+			end
 			ESP.Track(m, groupName)
 		end
 	end
 
-	watchedInstanceName[Instancename] = {
-		added = workspace.DescendantAdded:Connect(function(m)
-			if m.Name == Instancename then
-				ESP.Track(m, groupName)
-			end
-		end),
-		removed = workspace.DescendantRemoving:Connect(function(m)
-			if m.Name == Instancename then
-				ESP.Untrack(m)
-			end
-		end),
-	}
-end
-
-local function unwatchInstanceName(Instancename)
-	local rec = watchedInstanceName[Instancename]
-	if not rec then
-		return
-	end
-	rec.added:Disconnect()
-	rec.removed:Disconnect()
-	watchedInstanceName[Instancename] = nil
-
-	if Instancename then
-		for _, m in ipairs(workspace:GetDescendants()) do
-			if m.Name == Instancename then
-				ESP.Untrack(m)
-			end
-		end
-	end
-end
-
-local function watchFolder(folder, groupName)
-	if not folder then
-		return
-	end
-
-	if watchedFolders[folder] then
-		return
-	end
-
+	-- Track existing children
 	for _, m in ipairs(folder:GetChildren()) do
-		ESP.Track(m, groupName)
+		tryTrack(m)
 	end
 
+	-- Track future added children & cleanup on removal
 	watchedFolders[folder] = {
-		added = folder.ChildAdded:Connect(function(m)
-			ESP.Track(m, groupName)
-		end),
+		added = folder.ChildAdded:Connect(tryTrack),
 		removed = folder.ChildRemoved:Connect(function(m)
+			if attrConnections[m] then
+				attrConnections[m]:Disconnect()
+				attrConnections[m] = nil
+			end
 			ESP.Untrack(m)
 		end),
+		attrConns = attrConnections,
 	}
 end
 
@@ -216,8 +223,16 @@ local function unwatchFolder(folder)
 	if not rec then
 		return
 	end
+
 	rec.added:Disconnect()
 	rec.removed:Disconnect()
+
+	if rec.attrConns then
+		for _, conn in pairs(rec.attrConns) do
+			conn:Disconnect()
+		end
+	end
+
 	watchedFolders[folder] = nil
 
 	if folder then
@@ -225,32 +240,6 @@ local function unwatchFolder(folder)
 			ESP.Untrack(m)
 		end
 	end
-end
-
-local function watchFolderPredicate(folder, groupName, predicate)
-	if not folder then
-		return
-	end
-	if watchedFolders[folder] then
-		return
-	end
-
-	local function tryTrack(m)
-		if not predicate or predicate(m) then
-			ESP.Track(m, groupName)
-		end
-	end
-
-	for _, m in ipairs(folder:GetChildren()) do
-		tryTrack(m)
-	end
-
-	watchedFolders[folder] = {
-		added = folder.ChildAdded:Connect(tryTrack),
-		removed = folder.ChildRemoved:Connect(function(m)
-			ESP.Untrack(m)
-		end),
-	}
 end
 
 -- watchFolder(Workspace:FindFirstChild("NPCs"))  -- add more folders as needed
@@ -341,7 +330,7 @@ MainSettings:AddSlider("SpeedSlider", {
 	Default = Speed,
 	Min = 10,
 	Max = 250,
-	Rounding = 0,
+	Rounding = 1,
 	Compact = false,
 
 	Callback = function(Value)
@@ -540,7 +529,7 @@ MainSettings:AddSlider("InfJumpSlider", {
 	Default = InfJumpPowerValue,
 	Min = 10,
 	Max = 500,
-	Rounding = 0,
+	Rounding = 1,
 	Compact = false,
 
 	Callback = function(Value)
@@ -550,42 +539,126 @@ MainSettings:AddSlider("InfJumpSlider", {
 
 local NoFallDmgEnabled = false
 
+local function hookFallDmgFunction()
+	local WorldClient = game.Players.LocalPlayer.PlayerGui:FindFirstChild("WorldClient")
+	local env = getsenv(WorldClient)
+
+	local fallName, originalFall
+	for name, value in pairs(env) do
+		if type(value) == "function" and name:lower():find("fall") then
+			fallName, originalFall = name, value
+			break
+		end
+	end
+
+	if not originalFall then
+		warn("Could not find fall function")
+		return
+	end
+
+	NoFallDmgEnabled = true
+
+	env[fallName] = function(...)
+		if NoFallDmgEnabled then
+			return
+		end
+		return originalFall(...)
+	end
+end
+
 General:AddToggle("NoFallDmg_Toggle", {
 	Text = "No Fall Damage",
 	Default = false,
 	Callback = function(Value)
 		if Value then
-			local WorldClient = game.Players.LocalPlayer.PlayerGui:FindFirstChild("WorldClient")
-			local env = getsenv(WorldClient)
-
-			local fallName, originalFall
-			for name, value in pairs(env) do
-				if type(value) == "function" and name:lower():find("fall") then
-					fallName, originalFall = name, value
-					break
-				end
-			end
-
-			if not originalFall then
-				warn("Could not find fall function")
-				return
-			end
-
-			print("Hooking:", fallName)
-
-			NoFallDmgEnabled = true
-
-			env[fallName] = function(...)
-				if NoFallDmgEnabled then
-					return
-				end
-				return originalFall(...)
-			end
+			hookFallDmgFunction()
 		else
 			NoFallDmgEnabled = false
 		end
 	end,
 })
+
+local lifeFieldStates = {}
+
+General:AddToggle("RemoveCastleLightField_Toggle", {
+	Text = "Remove Castle Light Field",
+	Default = false,
+	Callback = function(Value)
+		if Value then
+			for _, lifeField in workspace:GetChildren() do
+				if lifeField.Name == "LifeField" and lifeField:IsA("BasePart") then
+					lifeFieldStates[lifeField] = {
+						CanCollide = lifeField.CanCollide,
+						CanTouch = lifeField.CanTouch,
+					}
+					lifeField.CanCollide = false
+					lifeField.CanTouch = false
+				end
+			end
+		else
+			for lifeField, state in pairs(lifeFieldStates) do
+				if lifeField.Parent then
+					lifeField.CanCollide = state.CanCollide
+					lifeField.CanTouch = state.CanTouch
+				end
+			end
+		end
+	end,
+})
+
+local AntiAfkConnection
+General:AddToggle("AntiAFK_Toggle", {
+	Text = "Anti-AFK",
+	Default = false,
+	Tooltip = "Prevents the 20-minute idle disconnect",
+	Callback = function(Value)
+		if Value then
+			local VirtualUser = cloneref(game:GetService("VirtualUser"))
+
+			AntiAfkConnection = Players.LocalPlayer.Idled:Connect(function()
+				VirtualUser:CaptureController()
+				VirtualUser:ClickButton2(Vector2.new())
+			end)
+		else
+			if AntiAfkConnection then
+				AntiAfkConnection:Disconnect()
+				AntiAfkConnection = nil
+			end
+		end
+	end,
+})
+
+TrackToggle("AntiAFK_Toggle")
+
+local OverlayGui = game:GetService("Players").LocalPlayer.PlayerGui.OverlayGui
+
+local RemoveInsanityActive = false
+General:AddToggle("RemoveInsanityScreen_Toggle", {
+	Text = "Remove Insanity Screen",
+	Default = false,
+	Tooltip = "Removes the blue screen you get when insane",
+	Callback = function(Value)
+		if Value then
+			local TerrorImg = OverlayGui:FindFirstChild("Terror")
+			local TerrorTendril = OverlayGui:FindFirstChild("TerrorTendril")
+			local TerrorTendril2 = OverlayGui:FindFirstChild("TerrorTendril2")
+			RemoveInsanityActive = true
+
+			task.spawn(function()
+				while RemoveInsanityActive do
+					TerrorImg.Visible = false
+					TerrorTendril.Visible = false
+					TerrorTendril2.Visible = false
+					task.wait()
+				end
+			end)
+		else
+			RemoveInsanityActive = false
+		end
+	end,
+})
+
+TrackToggle("RemoveInsanityScreen_Toggle")
 
 -------------------------------- Visual Tab --------------------------------
 local VisualTabBox = Tabs.Visual:AddLeftTabbox()
@@ -666,6 +739,9 @@ end
 
 for _, groupName in ipairs({ "Player", "Mob", "NPC", "Drop", "Chest" }) do
 	local config = ESPGroups[groupName]
+	addGroupToggle(groupName, "ShowBox", "Box")
+	addGroupToggle(groupName, "ShowBars", "Health Bars")
+	addGroupToggle(groupName, "ShowName", "Name")
 
 	local textOptions = {
 		"Name",
@@ -771,7 +847,7 @@ TempStorageVisualTabBoxMain:AddSlider("PlayerMaxDistance_Slider", {
 	Default = 5000,
 	Min = 100,
 	Max = 50000,
-	Rounding = 0,
+	Rounding = 1,
 	Compact = false,
 
 	Callback = function(Value)
@@ -807,7 +883,7 @@ TempStorageVisualTabBoxMain:AddToggle("Mob_ESP", {
 	Callback = function(Value)
 		local folder = workspace:FindFirstChild("Live")
 		if Value then
-			watchFolderPredicate(folder, "Mob", isMob)
+			watchFolderPredicate(folder, "Mob", isMob, "MOB_rich_name")
 		else
 			unwatchFolder(folder)
 		end
@@ -819,7 +895,7 @@ TempStorageVisualTabBoxMain:AddSlider("MobMaxDistance_Slider", {
 	Default = 5000,
 	Min = 100,
 	Max = 50000,
-	Rounding = 0,
+	Rounding = 1,
 	Compact = false,
 
 	Callback = function(Value)
@@ -833,7 +909,7 @@ TempStorageVisualTabBoxMain:AddToggle("NPC_ESP", {
 	Callback = function(Value)
 		local folder = workspace:FindFirstChild("NPCs")
 		if Value then
-			watchFolder(folder, "NPC")
+			watchFolderPredicate(folder, "NPC")
 		else
 			unwatchFolder(folder)
 		end
@@ -845,7 +921,7 @@ TempStorageVisualTabBoxMain:AddSlider("NPCMaxDistance_Slider", {
 	Default = 5000,
 	Min = 100,
 	Max = 50000,
-	Rounding = 0,
+	Rounding = 1,
 	Compact = false,
 
 	Callback = function(Value)
@@ -859,7 +935,7 @@ TempStorageVisualTabBoxMain:AddToggle("Drop_Esp", {
 	Callback = function(Value)
 		local folder = workspace:FindFirstChild("Drops")
 		if Value then
-			watchFolder(folder, "Drop")
+			watchFolderPredicate(folder, "Drop")
 		else
 			unwatchFolder(folder)
 		end
@@ -871,7 +947,7 @@ TempStorageVisualTabBoxMain:AddSlider("DropMaxDistance_Slider", {
 	Default = 5000,
 	Min = 100,
 	Max = 50000,
-	Rounding = 0,
+	Rounding = 1,
 	Compact = false,
 
 	Callback = function(Value)
@@ -879,24 +955,26 @@ TempStorageVisualTabBoxMain:AddSlider("DropMaxDistance_Slider", {
 	end,
 })
 
+--[[
 TempStorageVisualTabBoxMain:AddToggle("Chest_ESP", {
 	Text = "Chest Esp",
 	Default = false,
 	Callback = function(Value)
 		if Value then
-			watchInstanceName("Chest", "Chest")
+			watchFolderPredicate("Chest", "Chest")
 		else
 			unwatchInstanceName("Chest")
 		end
 	end,
 })
+]]
 
 TempStorageVisualTabBoxMain:AddSlider("ChestMaxDistance_Slider", {
 	Text = "Max Distance",
 	Default = 5000,
 	Min = 100,
 	Max = 50000,
-	Rounding = 0,
+	Rounding = 1,
 	Compact = false,
 
 	Callback = function(Value)
@@ -918,9 +996,13 @@ VisualMods:AddToggle("Chat_History", {
 	end,
 })
 
-local Original_Density = 0.7
 local RemoveFogConnection
 
+local Original_FogStart = Lighting.FogStart
+local Original_FogEnd = Lighting.FogEnd
+
+local Atmosphere = Lighting:FindFirstChild("Atmosphere")
+local Original_Density = Atmosphere.Density
 VisualMods:AddToggle("Remove_Fog", {
 	Text = "No Fog",
 	Default = false,
@@ -928,14 +1010,17 @@ VisualMods:AddToggle("Remove_Fog", {
 	Callback = function(Value)
 		if Value then
 			RemoveFogConnection = RunService.RenderStepped:Connect(function()
-				Lighting.Atmosphere.Density = 0
+				Atmosphere.Density = 0
+				Lighting.FogEnd = math.huge
+				Lighting.FogStart = math.huge
 			end)
 		else
 			if RemoveFogConnection then
 				RemoveFogConnection:Disconnect()
 			end
-
-			Lighting.Atmosphere.Density = Original_Density
+			Lighting.FogEnd = Original_FogStart
+			Lighting.FogStart = Original_FogEnd
+			Atmosphere.Density = Original_Density
 		end
 	end,
 })
@@ -978,7 +1063,7 @@ VisualMods:AddSlider("MaxZoom_Slider", {
 	Default = MaxZoomDefault,
 	Min = 10,
 	Max = 400, --YOU GET BANNED IF YOU GO TOO HIGH
-	Rounding = 0,
+	Rounding = 1,
 	Compact = false,
 
 	Callback = function(Value)
@@ -1053,6 +1138,8 @@ local function setupClick(label)
 					currentSpectateLoop:Disconnect()
 					currentSpectateLoop = nil
 				end
+
+				Library:Notify(`You cannot spectate yourself`)
 				return
 			end
 
@@ -1163,6 +1250,50 @@ VisualMods:AddToggle("LeaderboardSpectate_Toggle", {
 	end,
 })
 
+local LeaderboardPlayerTextLabel =
+	game:GetService("Players").LocalPlayer.PlayerGui.LeaderboardGui.MainFrame.ScrollingFrame.PlayerFrame.PlayerFrame.Player :: TextLabel
+
+local LeaderPlayerFrameButton =
+	game:GetService("Players").LocalPlayer.PlayerGui.LeaderboardGui.MainFrame.ScrollingFrame.PlayerFrame :: TextButton
+
+local StreamerModeConnections = {}
+
+VisualMods:AddToggle("StreamerMode_Toggle", {
+	Text = "Streamer Mode",
+	Default = false,
+	Tooltip = "Hides your account information like your username and userid",
+
+	Callback = function(Value)
+		if Value then
+			LeaderPlayerFrameButton.Visible = false
+		else
+			LeaderPlayerFrameButton.Visible = true
+		end
+	end,
+})
+TrackToggle("StreamerMode_Toggle")
+
+local RemoveBlurConnection
+
+VisualMods:AddToggle("RemoveBlur_Toggle", {
+	Text = "No Blur",
+	Default = false,
+
+	Callback = function(Value)
+		if Value then
+			RemoveBlurConnection = RunService.RenderStepped:Connect(function()
+				game:GetService("Lighting").GenericBlur.Size = 0
+			end)
+		else
+			if RemoveBlurConnection then
+				RemoveBlurConnection:Disconnect()
+			end
+		end
+	end,
+})
+
+--game:GetService("Lighting").GenericBlur
+
 --[[
 ESP:NewBar({
 	Name = "Health",
@@ -1211,11 +1342,17 @@ Players.PlayerAdded:Connect(function(player)
 	checkForModerator(player)
 end)
 
+local CharacterAddedConnection = player.CharacterAdded:Connect(function()
+	if NoFallDmgEnabled then
+		hookFallDmgFunction()
+	end
+end)
+
 -- ============ 4. Register bars ============
 ESP.NewBar({
 	Name = "Health",
 	Side = "Left",
-	Width = 3,
+	Width = 10,
 	LerpColor = true,
 
 	GetValue = function(char, instance)
@@ -1264,6 +1401,16 @@ Library:OnUnload(function()
 	Library.Unloaded = true
 	disconnectConnections()
 	DisableAllTrackedToggles()
+
+	disconnectAllLeaderboardSpectateLoops()
+	if CharacterAddedConnection then
+		CharacterAddedConnection:Disconnect()
+	end
+
+	setreadonly(mt, false)
+	mt.__newindex = oldNewIndex
+	setreadonly(mt, true)
+
 	if ESP and ESP.Unload then
 		pcall(function()
 			ESP.Unload()
