@@ -540,83 +540,6 @@ local function getWorldBoundingBox(model)
 	return nil
 end
 
--- FIX: tighter projection.
---   - Uses a small margin (viewport + 64px) so a single far-off corner
---     can't stretch the box across the screen.
---   - Projects visible corners when a box crosses the camera plane.
-local function projectBox(cf, size)
-	local half = size * 0.5
-	local corners = {
-		cf * Vector3.new(-half.X, -half.Y, -half.Z),
-		cf * Vector3.new(half.X, -half.Y, -half.Z),
-		cf * Vector3.new(-half.X, half.Y, -half.Z),
-		cf * Vector3.new(half.X, half.Y, -half.Z),
-		cf * Vector3.new(-half.X, -half.Y, half.Z),
-		cf * Vector3.new(half.X, -half.Y, half.Z),
-		cf * Vector3.new(-half.X, half.Y, half.Z),
-		cf * Vector3.new(half.X, half.Y, half.Z),
-	}
-
-	local minX, minY = math.huge, math.huge
-	local maxX, maxY = -math.huge, -math.huge
-	local frontCount = 0
-
-	for _, worldPos in ipairs(corners) do
-		local sp = Camera:WorldToViewportPoint(worldPos)
-		if sp.Z > 0 then
-			frontCount = frontCount + 1
-			minX = math.min(minX, sp.X)
-			minY = math.min(minY, sp.Y)
-			maxX = math.max(maxX, sp.X)
-			maxY = math.max(maxY, sp.Y)
-		end
-	end
-
-	if frontCount == 0 then
-		local centerPoint = Camera:WorldToViewportPoint(cf.Position)
-		if centerPoint.Z <= 0 then
-			return nil
-		end
-
-		local topPoint = Camera:WorldToViewportPoint(cf.Position + Vector3.new(0, half.Y, 0))
-		local rightPoint = Camera:WorldToViewportPoint(cf.Position + Vector3.new(half.X, 0, 0))
-		local fallbackHeight = math.abs(centerPoint.Y - topPoint.Y) * 2
-		local fallbackWidth = math.abs(centerPoint.X - rightPoint.X) * 2
-		if fallbackWidth < 1 or fallbackHeight < 1 then
-			return nil
-		end
-
-		return centerPoint.X - fallbackWidth * 0.5,
-			centerPoint.Y - fallbackHeight * 0.5,
-			centerPoint.X + fallbackWidth * 0.5,
-			centerPoint.Y + fallbackHeight * 0.5
-	end
-
-	local w = maxX - minX
-	local h = maxY - minY
-
-	-- Keep distant targets visible instead of dropping sub-pixel boxes.
-	if w <= 0 or h <= 0 then
-		return nil
-	end
-
-	-- Reject exploded projections (camera inside/near the box).
-	if w > 4000 or h > 4000 then
-		return nil
-	end
-
-	-- FIX: much tighter clamp. Previously 2000px which was effectively
-	-- no clamp at all. Now we only allow a small buffer outside viewport.
-	local vp = Camera.ViewportSize
-	local margin = 64
-	minX = math.clamp(minX, -margin, vp.X + margin)
-	maxX = math.clamp(maxX, -margin, vp.X + margin)
-	minY = math.clamp(minY, -margin, vp.Y + margin)
-	maxY = math.clamp(maxY, -margin, vp.Y + margin)
-
-	return minX, minY, maxX, maxY
-end
-
 -- ============================================================
 -- Box drawing
 -- ============================================================
@@ -788,23 +711,17 @@ local function updateTarget(instance, drawings)
 		end
 	end
 
-	local minX, minY, maxX, maxY = projectBox(cf, size)
-	if not minX then
+	local screenPoint, onScreen = Camera:WorldToViewportPoint(boxCenter)
+	if not onScreen or screenPoint.Z <= 0 then
 		hideESP(drawings)
 		return
 	end
 
-	local pad = getSetting(group, "Padding") or 0
-	minX = minX - pad
-	minY = minY - pad
-	maxX = maxX + pad
-	maxY = maxY + pad
-
-	-- Keep the box dimensions fixed in screen pixels; perspective only controls position.
 	local FIXED_BOX_WIDTH, FIXED_BOX_HEIGHT = 60, 90
 	local width, height = FIXED_BOX_WIDTH, FIXED_BOX_HEIGHT
-	local boxCenterX = (minX + maxX) * 0.5
-	local boxCenterY = (minY + maxY) * 0.5
+
+	local boxCenterX = screenPoint.X
+	local boxCenterY = screenPoint.Y
 	local boxX = boxCenterX - width * 0.5
 	local boxY = boxCenterY - height * 0.5
 
@@ -932,7 +849,7 @@ local function updateTarget(instance, drawings)
 			drawings.Name.Text = finalText
 			drawings.Name.Color = getSetting(group, "TextColor")
 			drawings.Name.Size = textSize
-			drawings.Name.Position = Vector2.new((minX + maxX) / 2, boxY - textSize - 4)
+			drawings.Name.Position = Vector2.new(boxCenterX, boxY - textSize - 4)
 			drawings.Name.Visible = true
 		else
 			drawings.Name.Visible = false
