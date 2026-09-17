@@ -743,10 +743,14 @@ local function updateTarget(instance, drawings)
 
 	-- Bars
 	if getSetting(group, "ShowBars") then
-		local leftOffset = 4
-		local rightOffset = 4
-		local bottomOffset = 4
-		local barSpacing = 2
+		-- Create a distance scale factor so the bars shrink along with the box
+		local scale = math.clamp(height / 90, 0.2, 1.5)
+
+		-- Scale the offsets so the gap doesn't look massive from far away
+		local leftOffset = math.max(1, math.floor(4 * scale))
+		local rightOffset = math.max(1, math.floor(4 * scale))
+		local bottomOffset = math.max(1, math.floor(4 * scale))
+		local barSpacing = math.max(1, math.floor(2 * scale))
 
 		local barBoxHeight = height
 		local barBoxWidth = width
@@ -760,7 +764,9 @@ local function updateTarget(instance, drawings)
 				end
 				maxVal = (maxVal and maxVal > 0) and maxVal or 100
 				local ratio = math.clamp((curVal or 0) / maxVal, 0, 1)
-				local barWidth = barDef.Width or 2
+
+				-- Scale the bar's width so it gets thinner in the distance!
+				local barWidth = math.max(1, math.floor((barDef.Width or 2) * scale))
 
 				if barDef.Side == "Right" then
 					local barX = boxX + width + rightOffset
