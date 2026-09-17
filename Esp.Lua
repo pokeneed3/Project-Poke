@@ -1,3 +1,4 @@
+print("hello")
 -- Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -841,7 +842,7 @@ local function updateTarget(instance, drawings)
 		drawings.Name.Visible = false
 	end
 end
-print("hello")
+
 -- ============================================================
 -- Render loop
 -- ============================================================
