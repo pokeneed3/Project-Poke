@@ -801,11 +801,11 @@ local function updateTarget(instance, drawings)
 	maxY = maxY + pad
 
 	local boxX, boxY = minX, minY
-	local MAX_WIDTH = 200
-	local MAX_HEIGHT = 100
+	local MIN_WIDTH, MAX_WIDTH = 20, 150
+	local MIN_HEIGHT, MAX_HEIGHT = 20, 100
 
-	local width = math.clamp(maxX - minX, 1, MAX_WIDTH)
-	local height = math.clamp(maxY - minY, 1, MAX_HEIGHT)
+	local width = math.clamp(maxX - minX, MIN_WIDTH, MAX_WIDTH)
+	local height = math.clamp(maxY - minY, MIN_HEIGHT, MAX_HEIGHT)
 
 	-- Box
 	if getSetting(group, "ShowBox") then
