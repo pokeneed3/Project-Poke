@@ -64,6 +64,9 @@ ESPGroups.Mob.ShowDistance = true
 ESPGroups.Mob.ShowBox = false
 ESPGroups.Mob.ShowBars = false
 
+ESPGroups.NPC.ShowHealthPercentage = false
+ESPGroups.Chest.ShowHealthPercentage = false
+ESPGroups.Drop.ShowHealthPercentage = false
 ESPGroups.NPC.ShowBars = false
 ESPGroups.NPC.ShowBox = false
 ESPGroups.Chest.ShowBars = false
@@ -598,6 +601,29 @@ local PlayerPlayerVisualSettings = RightVisualTabBox:AddTab("Settings")
 local VisualMods = VisualTabBox:AddTab("Mods")
 local PlayerVisualSettings = VisualTabBox:AddTab("Settings")
 
+local function addGroupBooleanDropDown(groupName, key, label)
+	local config = ESPGroups[groupName]
+	local optionName = "ESP_" .. groupName .. "_" .. key
+
+	local defaultValue = config[key]
+	if defaultValue == nil then
+		defaultValue = ESPConfig[key]
+	end
+
+	local defaultOption = defaultValue and "On" or "Off"
+
+	TempStorageVisualTabBoxSettings:AddDropdown(optionName, {
+		Values = { "On", "Off" },
+		Default = defaultOption,
+		Multi = false,
+		Text = groupName .. " - " .. label,
+
+		Callback = function(value)
+			config[key] = value == "On"
+		end,
+	})
+end
+
 local function addGroupToggle(groupName, key, label)
 	local config = ESPGroups[groupName]
 	local optionName = "ESP_" .. groupName .. "_" .. key
@@ -639,14 +665,42 @@ local function addGroupToggle(groupName, key, label)
 end
 
 for _, groupName in ipairs({ "Player", "Mob", "NPC", "Drop", "Chest" }) do
+	local config = ESPGroups[groupName]
+
 	addGroupToggle(groupName, "ShowName", "Name")
-	addGroupToggle(groupName, "ShowDistance", "Distance")
-	if groupName == "NPC" or groupName == "Drop" or groupName == "Chest" then
-		continue
-	else
-		addGroupToggle(groupName, "ShowBars", "Health Bar")
-		addGroupToggle(groupName, "ShowBox", "Box")
-	end
+
+	local textOptions = {
+		"Name",
+		"Distance",
+		"HealthPercentage",
+	}
+
+	TempStorageVisualTabBoxSettings:AddDropdown("ESP_" .. groupName .. "_Text", {
+		Values = textOptions,
+		Default = (function()
+			local selected = {}
+
+			if config.ShowName then
+				table.insert(selected, "Name")
+			end
+			if config.ShowDistance then
+				table.insert(selected, "Distance")
+			end
+			if config.ShowHealthPercentage then
+				table.insert(selected, "HealthPercentage")
+			end
+
+			return selected
+		end)(),
+		Multi = true,
+		Text = groupName .. " - Text Display",
+
+		Callback = function(values)
+			config.ShowName = values.Name == true
+			config.ShowDistance = values.Distance == true
+			config.ShowHealthPercentage = values.HealthPercentage == true
+		end,
+	})
 end
 
 -- Master ESP Toggle with Box Colorpicker attached
@@ -724,17 +778,6 @@ TempStorageVisualTabBoxMain:AddSlider("PlayerMaxDistance_Slider", {
 
 	Callback = function(Value)
 		ESPGroups.Player.MaxDistance = Value
-	end,
-})
-
-TempStorageVisualTabBoxMain:AddToggle("ESP_HealthPercent", {
-	Text = "Health Percentage",
-	Default = ESPConfig.ShowHealthPercentage,
-	Callback = function(value)
-		for _, groupConfig in pairs(ESPGroups) do
-			groupConfig.ShowHealthPercentage = value
-		end
-		ESPConfig.ShowHealthPercentage = value
 	end,
 })
 
