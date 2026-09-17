@@ -641,11 +641,13 @@ local function hideESP(drawings)
 	end
 end
 
+local FIXED_BOX_WIDTH = 60
+local FIXED_BOX_HEIGHT = 90
+
 local function updateTarget(instance, drawings)
 	local target = drawings.Target
 	local group = target.Group
 
-	-- Group refresh if requested
 	if target.NeedsRefresh then
 		target.NeedsRefresh = false
 		RefreshGroup(instance)
@@ -658,16 +660,6 @@ local function updateTarget(instance, drawings)
 		return
 	end
 
-	-- Reject distant targets before the expensive bounding-box calculation.
-	local maxDist = getSetting(group, "MaxDistance")
-	if maxDist and (Camera.CFrame.Position - root.Position).Magnitude > maxDist then
-		hideESP(drawings)
-		return
-	end
-
-	-- FIX: compute the bounding box first, and use its center for the
-	-- distance check. Using root.Position gave inconsistent distances
-	-- depending on which part was picked as root.
 	local cf, size = getWorldBoundingBox(char)
 	if not cf then
 		hideESP(drawings)
@@ -677,15 +669,19 @@ local function updateTarget(instance, drawings)
 	local boxCenter = cf.Position
 	local distance = (Camera.CFrame.Position - boxCenter).Magnitude
 
-	-- FIX: use configurable MinDistance instead of hardcoded 4, and
-	-- check against the box center so it's stable per-target.
+	-- Distance gating
+	local maxDist = getSetting(group, "MaxDistance")
+	if maxDist and distance > maxDist then
+		hideESP(drawings)
+		return
+	end
 	local minDist = getSetting(group, "MinDistance") or 6
 	if distance < minDist then
 		hideESP(drawings)
 		return
 	end
 
-	-- Team check (per-group)
+	-- Team check
 	local isTeammate = getSetting(group, "TeamCheck")
 		and LocalPlayer.Team ~= nil
 		and target.GetTeam() == LocalPlayer.Team
@@ -694,11 +690,10 @@ local function updateTarget(instance, drawings)
 		return
 	end
 
-	-- Occlusion check (optional)
+	-- Occlusion
 	if getSetting(group, "OcclusionCheck") then
 		local params = RaycastParams.new()
 		params.FilterType = Enum.RaycastFilterType.Exclude
-		-- FIX: don't put nil in the filter list when local char is gone.
 		local filter = { char }
 		if LocalPlayer.Character then
 			table.insert(filter, LocalPlayer.Character)
@@ -711,15 +706,16 @@ local function updateTarget(instance, drawings)
 		end
 	end
 
+	-- SINGLE projected anchor point. No corner projection. No size math.
 	local screenPoint, onScreen = Camera:WorldToViewportPoint(boxCenter)
 	if not onScreen or screenPoint.Z <= 0 then
 		hideESP(drawings)
 		return
 	end
 
-	local FIXED_BOX_WIDTH, FIXED_BOX_HEIGHT = 60, 90
-	local width, height = FIXED_BOX_WIDTH, FIXED_BOX_HEIGHT
-
+	-- Hard-locked size. Nothing below this line can change width/height.
+	local width = FIXED_BOX_WIDTH
+	local height = FIXED_BOX_HEIGHT
 	local boxCenterX = screenPoint.X
 	local boxCenterY = screenPoint.Y
 	local boxX = boxCenterX - width * 0.5
@@ -739,14 +735,12 @@ local function updateTarget(instance, drawings)
 		local bottomOffset = 4
 		local barSpacing = 2
 
-		local barBoxHeight = math.clamp(height, 8, 500)
-		local barBoxWidth = math.clamp(width, 8, 500)
+		local barBoxHeight = height
+		local barBoxWidth = width
 
 		for _, barDef in ipairs(CustomBars) do
 			local barDrawings = drawings.Bars[barDef.Name]
 			if barDrawings then
-				-- FIX: wrap GetValue in pcall so a bad user callback
-				-- doesn't nuke the entire target's drawings for a frame.
 				local ok, curVal, maxVal = pcall(barDef.GetValue, char, instance)
 				if not ok then
 					curVal, maxVal = 0, 100
@@ -758,31 +752,25 @@ local function updateTarget(instance, drawings)
 				if barDef.Side == "Right" then
 					local barX = boxX + width + rightOffset
 					rightOffset = rightOffset + barWidth + barSpacing + 2
-
 					barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
 					barDrawings.Outline.Size = Vector2.new(barWidth + 2, barBoxHeight + 2)
-
 					local barHeight = math.clamp(math.floor(barBoxHeight * ratio), 0, barBoxHeight)
 					barDrawings.Fill.Position = Vector2.new(barX, boxY + (barBoxHeight - barHeight))
 					barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
 				elseif barDef.Side == "Bottom" then
 					local barY = boxY + height + bottomOffset
 					bottomOffset = bottomOffset + barWidth + barSpacing + 2
-
 					barDrawings.Outline.Position = Vector2.new(boxX - 1, barY - 1)
 					barDrawings.Outline.Size = Vector2.new(barBoxWidth + 2, barWidth + 2)
-
 					local fillWidth = math.clamp(math.floor(barBoxWidth * ratio), 0, barBoxWidth)
 					barDrawings.Fill.Position = Vector2.new(boxX, barY)
 					barDrawings.Fill.Size = Vector2.new(fillWidth, barWidth)
-				else -- "Left"
+				else
 					leftOffset = leftOffset + barWidth
 					local barX = boxX - leftOffset
 					leftOffset = leftOffset + barSpacing + 2
-
 					barDrawings.Outline.Position = Vector2.new(barX - 1, boxY - 1)
 					barDrawings.Outline.Size = Vector2.new(barWidth + 2, barBoxHeight + 2)
-
 					local barHeight = math.clamp(math.floor(barBoxHeight * ratio), 0, barBoxHeight)
 					barDrawings.Fill.Position = Vector2.new(barX, boxY + (barBoxHeight - barHeight))
 					barDrawings.Fill.Size = Vector2.new(barWidth, barHeight)
@@ -808,31 +796,27 @@ local function updateTarget(instance, drawings)
 		end
 	end
 
-	-- Text label
+	-- Text
 	local showName = getSetting(group, "ShowName")
 	local showDist = getSetting(group, "ShowDistance")
 	local showHealth = getSetting(group, "ShowHealthPercentage")
 
 	if showName or showDist or showHealth then
 		local finalText
-
 		if ESPConfig.FormatText then
 			local ok, result = pcall(ESPConfig.FormatText, target, char, distance, group)
 			if ok and result then
 				finalText = result
 			end
 		end
-
 		if not finalText then
 			local parts = {}
 			if showName then
 				table.insert(parts, target.GetName())
 			end
-
 			if showDist then
 				table.insert(parts, "[" .. math.floor(distance) .. "m]")
 			end
-
 			if showHealth then
 				local humanoid = char:FindFirstChildOfClass("Humanoid")
 				if humanoid and humanoid.MaxHealth > 0 then
@@ -840,7 +824,6 @@ local function updateTarget(instance, drawings)
 					table.insert(parts, "[" .. healthPercent .. "%]")
 				end
 			end
-
 			finalText = table.concat(parts, " ")
 		end
 
