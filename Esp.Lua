@@ -841,7 +841,7 @@ local function updateTarget(instance, drawings)
 		drawings.Name.Visible = false
 	end
 end
-
+print("hello")
 -- ============================================================
 -- Render loop
 -- ============================================================
