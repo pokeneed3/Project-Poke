@@ -800,21 +800,9 @@ local function updateTarget(instance, drawings)
 	maxX = maxX + pad
 	maxY = maxY + pad
 
-	local rootPoint = Camera:WorldToViewportPoint(root.Position)
-	if rootPoint.Z <= 0 then
-		hideESP(drawings)
-		return
-	end
-
 	local boxX, boxY = minX, minY
-	local centerX = rootPoint.X
-	local centerY = rootPoint.Y
-
-	local width = 40
-	local height = 70
-
-	boxX = centerX - width / 2
-	boxY = centerY - height / 2
+	local width = math.max(maxX - minX, 1)
+	local height = math.max(maxY - minY, 1)
 
 	-- Box
 	if getSetting(group, "ShowBox") then
