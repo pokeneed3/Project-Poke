@@ -667,8 +667,6 @@ end
 for _, groupName in ipairs({ "Player", "Mob", "NPC", "Drop", "Chest" }) do
 	local config = ESPGroups[groupName]
 
-	addGroupToggle(groupName, "ShowName", "Name")
-
 	local textOptions = {
 		"Name",
 		"Distance",
