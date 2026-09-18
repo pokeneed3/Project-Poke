@@ -206,7 +206,7 @@ end
 -- ============================================================
 -- Target Construction
 -- ============================================================
-print("hello")
+print("hello1")
 local function makeTarget(instance, groupOverride)
 	if not instance then
 		return nil
@@ -385,19 +385,31 @@ end
 
 -- Fast validation check
 local function isValidCharacter(target)
-	local model = target.GetModel()
-	if not model or not model.Parent then
+	local instance = target.GetModel()
+	if not instance or not instance.Parent then
 		return nil
 	end
 
-	local humanoid = model:FindFirstChildOfClass("Humanoid")
-	local root = model:FindFirstChild("HumanoidRootPart")
-		or model.PrimaryPart
-		or model:FindFirstChildWhichIsA("BasePart")
+	local model = instance
+	local root
+
+	if instance:IsA("BasePart") then
+		root = instance
+		model = instance:FindFirstAncestorOfClass("Model") or instance
+	elseif instance:IsA("Model") then
+		root = instance:FindFirstChild("HumanoidRootPart")
+			or instance.PrimaryPart
+			or instance:FindFirstChildWhichIsA("BasePart", true)
+	else
+		root = instance:FindFirstChildWhichIsA("BasePart", true)
+		model = instance:FindFirstAncestorOfClass("Model") or instance
+	end
 
 	if not root then
 		return nil
 	end
+
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if humanoid and humanoid.Health <= 0 then
 		return nil
 	end
