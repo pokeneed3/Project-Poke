@@ -1425,11 +1425,14 @@ local ProximityTitleLabel = Library:CreateLabel({
 	Parent = PlayerProximityInner,
 })
 
-local PlayerProximityTextLabelContainer = Library:Create("Frame", {
+local PlayerProximityTextLabelContainer = Library:Create("ScrollingFrame", {
 	BackgroundTransparency = 1,
-	Size = UDim2.fromScale(1, 0),
-	AutomaticSize = Enum.AutomaticSize.Y,
 	Position = UDim2.fromOffset(0, 22),
+	Size = UDim2.new(1, 0, 0, 130),
+	CanvasSize = UDim2.fromScale(0, 0),
+	AutomaticCanvasSize = Enum.AutomaticSize.Y,
+	ScrollBarThickness = 4,
+	ScrollingDirection = Enum.ScrollingDirection.Y,
 	ZIndex = 104,
 	Parent = PlayerProximityInner,
 })
@@ -1437,7 +1440,7 @@ local PlayerProximityTextLabelContainer = Library:Create("Frame", {
 Library:Create("UIListLayout", {
 	FillDirection = Enum.FillDirection.Vertical,
 	SortOrder = Enum.SortOrder.LayoutOrder,
-	Padding = UDim.new(0, 2),
+	Padding = UDim.new(0, 5),
 	Parent = PlayerProximityTextLabelContainer,
 })
 
@@ -1491,6 +1494,7 @@ local function UpdateProximityList()
 	end
 
 	ProximityTitleLabel.Text = string.format("Nearby Players (%d)", count)
+	ProximityTitleLabel.TextColor3 = count > 0 and Color3.fromRGB(255, 80, 80) or Color3.fromRGB(160, 255, 160)
 
 	-- Create or Update TextLabels for active nearby players
 	for plr, dist in pairs(activePlayers) do
@@ -1503,6 +1507,8 @@ local function UpdateProximityList()
 				Text = displayText,
 				TextColor3 = plr.Name == currentSpectateName and Color3.fromRGB(111, 0, 255) or Library.FontColor,
 				Size = UDim2.new(1, 0, 0, 18),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				TextWrapped = true,
 				TextXAlignment = Enum.TextXAlignment.Left,
 				ZIndex = 105, -- Render above background frame (101)
 				Parent = PlayerProximityTextLabelContainer,
