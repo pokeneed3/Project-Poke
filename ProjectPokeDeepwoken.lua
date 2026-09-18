@@ -12,7 +12,7 @@ local player = game.Players.LocalPlayer
 if not player.Character then
 	player.CharacterAdded:Wait()
 end
---te
+
 local Camera = workspace.CurrentCamera
 
 -- Variables
