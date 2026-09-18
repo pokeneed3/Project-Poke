@@ -93,6 +93,17 @@ local Tab2 = TabBox:AddTab("Tab 2")
 
 -- Groupbox:AddToggle
 -- Arguments: Index, Options
+
+local Toggle = LeftGroupBox:AddToggle("AutoFarm", {
+	Text = "Enable Auto Farm",
+	Default = false,
+}):AddKeyPicker("AutoFarmKey", {
+	Default = "F",
+	Text = "Auto Farm Key",
+	Mode = "Toggle",
+	SyncToggleState = true,
+})
+
 LeftGroupBox:AddToggle("MyToggle", {
 	Text = "This is a toggle",
 	Tooltip = "This is a tooltip", -- Information shown when you hover over the toggle
@@ -175,6 +186,22 @@ end)
 
 	You can call :AddButton on a button to add a SubButton!
 ]]
+
+local Toggle = LeftGroupBox:AddToggle("AutoFarm", {
+	Text = "Enable Auto Farm",
+	Default = false,
+})
+local Keybind = Toggle:AddKeyPicker("AutoFarmKey", {
+	Default = "F",
+	Text = "Auto Farm Key",
+	Mode = "Toggle",
+})
+Options.AutoFarmKey:OnClick(function()
+	print("Keybind clicked:", Options.AutoFarmKey:GetState())
+end)
+Options.AutoFarmKey:OnChanged(function()
+	print("Key changed to:", table.unpack(Options.AutoFarmKey.Modifiers or {}), Options.AutoFarmKey.Value)
+end)
 
 local MyButton = LeftGroupBox:AddButton({
 	Text = "Button",

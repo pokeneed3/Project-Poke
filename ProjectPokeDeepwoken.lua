@@ -1135,129 +1135,141 @@ end
 
 local leaderboardspectateLoops = {}
 local currentSpectateLoop
-local currentSpectateLabel
 local currentSpectateName
 local ListenForHealthChangeConnection
+local PlayerLabels = {}
 
 local function extractUsername(text)
 	local username = text:match("^(.-)%s*%(") or text
 	return username
 end
 
-local function findCharacterByLabelText(text)
-	local username = extractUsername(text)
-	for _, plr in ipairs(Players:GetPlayers()) do
-		if plr.Name == username then
-			return plr.Character
+local function findLeaderboardLabel(playerName)
+	if not ScrollingFrame then
+		return nil
+	end
+
+	for _, descendant in ipairs(ScrollingFrame:GetDescendants()) do
+		if descendant.Name == "Player" and descendant:IsA("TextLabel") then
+			if extractUsername(descendant.Text) == playerName then
+				return descendant
+			end
 		end
 	end
+
 	return nil
+end
+
+local function setSpectateLabelColor(playerName, color)
+	local leaderboardLabel = findLeaderboardLabel(playerName)
+	if leaderboardLabel then
+		leaderboardLabel.TextColor3 = color
+	end
+
+	local targetPlayer = Players:FindFirstChild(playerName)
+	local proximityLabel = targetPlayer and PlayerLabels[targetPlayer]
+	if proximityLabel then
+		proximityLabel.TextColor3 = color
+	end
+
+	return leaderboardLabel
+end
+
+local function spectatePlayer(targetPlayerOrName)
+	local targetPlayer
+	if typeof(targetPlayerOrName) == "Instance" and targetPlayerOrName:IsA("Player") then
+		targetPlayer = targetPlayerOrName
+	elseif type(targetPlayerOrName) == "string" then
+		targetPlayer = Players:FindFirstChild(extractUsername(targetPlayerOrName))
+	end
+
+	if not targetPlayer then
+		Library:Notify("Player was not found")
+		return
+	end
+
+	local spectateName = targetPlayer.Name
+
+	if spectateName == currentSpectateName then
+		if currentSpectateLoop then
+			currentSpectateLoop:Disconnect()
+			currentSpectateLoop = nil
+		end
+		setSpectateLabelColor(spectateName, Color3.fromRGB(255, 255, 255))
+		currentSpectateName = nil
+		return
+	end
+
+	if currentSpectateName then
+		setSpectateLabelColor(currentSpectateName, Color3.fromRGB(255, 255, 255))
+	end
+
+	if currentSpectateLoop then
+		currentSpectateLoop:Disconnect()
+		currentSpectateLoop = nil
+	end
+
+	if ListenForHealthChangeConnection then
+		ListenForHealthChangeConnection:Disconnect()
+		ListenForHealthChangeConnection = nil
+	end
+
+	if targetPlayer == player then
+		Library:Notify(`You cannot spectate yourself`)
+		return
+	end
+
+	local character = targetPlayer.Character
+	local humanoid = character and character:FindFirstChild("Humanoid")
+	if not humanoid and character then
+		humanoid = character:WaitForChild("Humanoid", 5)
+	end
+
+	if not character or not humanoid then
+		Library:Notify(`{character} doesnt have a valid Character or Humanoid`)
+		return
+	end
+
+	setSpectateLabelColor(spectateName, Color3.fromRGB(111, 0, 255))
+	currentSpectateName = spectateName
+
+	local localHumanoid = player.Character and player.Character:FindFirstChild("Humanoid")
+	if localHumanoid then
+		local previousHealth = localHumanoid.Health
+
+		ListenForHealthChangeConnection = localHumanoid.HealthChanged:Connect(function(newHealth)
+			if newHealth < previousHealth and currentSpectateLoop then
+				setSpectateLabelColor(spectateName, Color3.fromRGB(255, 255, 255))
+
+				currentSpectateLoop:Disconnect()
+				currentSpectateLoop = nil
+			end
+			previousHealth = newHealth
+		end)
+	end
+
+	currentSpectateLoop = RunService.Heartbeat:Connect(function()
+		local targetCharacter = targetPlayer.Character
+		local targetHumanoid = targetCharacter and targetCharacter:FindFirstChild("Humanoid")
+
+		if not targetCharacter or not targetHumanoid then
+			setSpectateLabelColor(spectateName, Color3.fromRGB(255, 255, 255))
+
+			currentSpectateLoop:Disconnect()
+			currentSpectateLoop = nil
+
+			Library:Notify(`{targetCharacter} doesnt have a valid Character or Humanoid`)
+			return
+		end
+
+		workspace.CurrentCamera.CameraSubject = targetHumanoid
+	end)
 end
 
 local function setupClick(label)
 	local connection = label.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			local spectateName = label.Text
-
-			if spectateName == currentSpectateName then
-				if currentSpectateLoop then
-					currentSpectateLoop:Disconnect()
-					currentSpectateLoop = nil
-				end
-				if currentSpectateLabel then
-					currentSpectateLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-					currentSpectateLabel = nil
-				end
-				currentSpectateName = nil
-				return
-			end
-
-			if currentSpectateLabel then
-				currentSpectateLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-			end
-
-			if currentSpectateLoop then
-				currentSpectateLoop:Disconnect()
-				currentSpectateLoop = nil
-			end
-
-			if ListenForHealthChangeConnection then
-				ListenForHealthChangeConnection:Disconnect()
-				ListenForHealthChangeConnection = nil
-			end
-
-			if spectateName == player.Character.Name then
-				if currentSpectateLabel then
-					currentSpectateLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-				end
-
-				if currentSpectateLoop then
-					currentSpectateLoop:Disconnect()
-					currentSpectateLoop = nil
-				end
-
-				Library:Notify(`You cannot spectate yourself`)
-				return
-			end
-
-			if
-				not findCharacterByLabelText(spectateName)
-				or not findCharacterByLabelText(spectateName):WaitForChild("Humanoid", 5)
-			then
-				Library:Notify(`{findCharacterByLabelText(spectateName)} doesnt have a valid Character or Humanoid`)
-
-				if currentSpectateLabel then
-					currentSpectateLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-				end
-
-				return
-			end
-
-			label.TextColor3 = Color3.fromRGB(111, 0, 255)
-			currentSpectateLabel = label
-			currentSpectateName = spectateName
-
-			local humanoid = player.Character:WaitForChild("Humanoid")
-
-			if humanoid then
-				local previousHealth = humanoid.Health
-
-				ListenForHealthChangeConnection = humanoid.HealthChanged:Connect(function(newHealth)
-					if newHealth < previousHealth then
-						if currentSpectateLoop then
-							if currentSpectateLabel then
-								currentSpectateLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-							end
-
-							currentSpectateLoop:Disconnect()
-							currentSpectateLoop = nil
-						end
-					end
-					previousHealth = newHealth
-				end)
-			end
-
-			currentSpectateLoop = RunService.Heartbeat:Connect(function()
-				local character = findCharacterByLabelText(spectateName)
-				local humanoid = character and character:FindFirstChild("Humanoid")
-
-				if not character or not humanoid then
-					if currentSpectateLabel then
-						currentSpectateLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-					end
-
-					currentSpectateLoop:Disconnect()
-					currentSpectateLoop = nil
-
-					Library:Notify(`{findCharacterByLabelText(spectateName)} doesnt have a valid Character or Humanoid`)
-
-					return
-				end
-
-				if humanoid then
-					workspace.CurrentCamera.CameraSubject = humanoid
-				end
-			end)
+			spectatePlayer(extractUsername(label.Text))
 		end
 	end)
 
@@ -1275,9 +1287,8 @@ local function disconnectAllLeaderboardSpectateLoops()
 		currentSpectateLoop = nil
 	end
 
-	if currentSpectateLabel then
-		currentSpectateLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-		currentSpectateLabel = nil
+	if currentSpectateName then
+		setSpectateLabelColor(currentSpectateName, Color3.fromRGB(255, 255, 255))
 	end
 
 	currentSpectateName = nil
@@ -1364,56 +1375,204 @@ VisualMods:AddToggle("RemoveBlur_Toggle", {
 })
 
 local PlayerProximityWindowVisible = true
+local ProximityMaxDistance = 1000 -- Max detection distance in studs
 
+-- 1. Create the UI Window Frame
+local PlayerProximityOuter = Library:Create("Frame", {
+	AnchorPoint = Vector2.new(0, 0),
+	BorderColor3 = Color3.new(0, 0, 0),
+	Position = UDim2.new(0, 10, 0.5, 0),
+	Size = UDim2.fromOffset(220, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	Visible = PlayerProximityWindowVisible,
+	ZIndex = 100,
+	Parent = Library.ScreenGui,
+})
+
+local PlayerProximityInner = Library:Create("Frame", {
+	BackgroundColor3 = Library.MainColor,
+	BorderColor3 = Library.OutlineColor,
+	BorderMode = Enum.BorderMode.Inset,
+	Size = UDim2.fromScale(1, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	ZIndex = 101,
+	Parent = PlayerProximityOuter,
+})
+
+Library:AddToRegistry(PlayerProximityInner, {
+	BackgroundColor3 = "MainColor",
+	BorderColor3 = "OutlineColor",
+}, true)
+
+local ColorFrame = Library:Create("Frame", {
+	BackgroundColor3 = Library.AccentColor,
+	BorderSizePixel = 0,
+	Size = UDim2.new(1, 0, 0, 2),
+	ZIndex = 102,
+	Parent = PlayerProximityInner,
+})
+
+Library:AddToRegistry(ColorFrame, {
+	BackgroundColor3 = "AccentColor",
+}, true)
+
+local ProximityTitleLabel = Library:CreateLabel({
+	Size = UDim2.new(1, 0, 0, 20),
+	Position = UDim2.fromOffset(5, 2),
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Text = "Nearby Players (0)",
+	ZIndex = 104,
+	Parent = PlayerProximityInner,
+})
+
+local PlayerProximityTextLabelContainer = Library:Create("Frame", {
+	BackgroundTransparency = 1,
+	Size = UDim2.fromScale(1, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	Position = UDim2.fromOffset(0, 22),
+	ZIndex = 104,
+	Parent = PlayerProximityInner,
+})
+
+Library:Create("UIListLayout", {
+	FillDirection = Enum.FillDirection.Vertical,
+	SortOrder = Enum.SortOrder.LayoutOrder,
+	Padding = UDim.new(0, 2),
+	Parent = PlayerProximityTextLabelContainer,
+})
+
+Library:Create("UIPadding", {
+	PaddingLeft = UDim.new(0, 10),
+	PaddingRight = UDim.new(0, 10),
+	PaddingTop = UDim.new(0, 4),
+	PaddingBottom = UDim.new(0, 6),
+	Parent = PlayerProximityTextLabelContainer,
+})
+
+Library:MakeDraggable(PlayerProximityOuter)
+
+local function ClearPlayerLabels()
+	for plr, label in pairs(PlayerLabels) do
+		if label then
+			label:Destroy()
+		end
+	end
+	table.clear(PlayerLabels)
+end
+
+local function UpdateProximityList()
+	if not PlayerProximityWindowVisible then
+		return
+	end
+
+	local localChar = player.Character
+	local localRoot = localChar and localChar:FindFirstChild("HumanoidRootPart")
+
+	local activePlayers = {}
+	local count = 0
+
+	if localRoot then
+		for _, plr in ipairs(Players:GetPlayers()) do
+			-- Exclude LocalPlayer
+			if plr ~= player then
+				local char = plr.Character
+				local root = char and char:FindFirstChild("HumanoidRootPart")
+				local hum = char and char:FindFirstChildOfClass("Humanoid")
+
+				if root and hum and hum.Health > 0 then
+					local distance = math.floor((localRoot.Position - root.Position).Magnitude)
+					if distance <= ProximityMaxDistance then
+						count += 1
+						activePlayers[plr] = distance
+					end
+				end
+			end
+		end
+	end
+
+	ProximityTitleLabel.Text = string.format("Nearby Players (%d)", count)
+
+	-- Create or Update TextLabels for active nearby players
+	for plr, dist in pairs(activePlayers) do
+		local label = PlayerLabels[plr]
+		local displayText = `{plr:GetAttribute("CharacterName")} - {dist} studs`
+
+		if not label then
+			label = Library:CreateLabel({
+				Active = true,
+				Text = displayText,
+				TextColor3 = plr.Name == currentSpectateName and Color3.fromRGB(111, 0, 255) or Library.FontColor,
+				Size = UDim2.new(1, 0, 0, 18),
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ZIndex = 105, -- Render above background frame (101)
+				Parent = PlayerProximityTextLabelContainer,
+			})
+
+			label.InputBegan:Connect(function(input)
+				if input.UserInputType == Enum.UserInputType.MouseButton1 then
+					spectatePlayer(plr)
+				end
+			end)
+
+			PlayerLabels[plr] = label
+		else
+			label.Text = displayText
+			label.TextColor3 = plr.Name == currentSpectateName and Color3.fromRGB(111, 0, 255) or Library.FontColor
+		end
+	end
+
+	-- Destroy labels for players who left, died, or moved out of range
+	for plr, label in pairs(PlayerLabels) do
+		if not activePlayers[plr] then
+			if label then
+				label:Destroy()
+			end
+			PlayerLabels[plr] = nil
+		end
+	end
+end
+
+-- 3. Register UI Toggle
 VisualMods:AddToggle("PlayerProximity_Toggle", {
 	Text = "Player Proximity",
 	Default = true,
-
 	Callback = function(Value)
-		if Value then
-		else
+		PlayerProximityWindowVisible = Value
+		if PlayerProximityOuter then
+			PlayerProximityOuter.Visible = Value
+		end
+		if not Value then
+			ClearPlayerLabels()
 		end
 	end,
 })
 
---[[
-local PlayerProximityWindow = Library:CreateWindow({
-	Title = "Player Proximity",
-	AutoShow = PlayerProximityWindowVisible,
-	Size = UDim2.fromOffset(300, 150),
-})
-]]
-
---[[
-local function UpdateProximityLabel()
-    local char = player.Character
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    if not root then
-        ProxLabel:SetText("Nearby: 0")
-        return
-    end
-
-    local count = 0
-
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= player and plr.Character then
-            local otherRoot = plr.Character:FindFirstChild("HumanoidRootPart")
-            if otherRoot then
-                local distance = (root.Position - otherRoot.Position).Magnitude
-                if distance <= 100 then
-                    count += 1
-                end
-            end
-        end
-    end
-
-    ProxLabel:SetText("Nearby: " .. count)
-end
-
-RunService.RenderStepped:Connect(function()
-    UpdateProximityLabel()
+-- 4. Throttled update loop (10 checks per second)
+task.spawn(function()
+	while true do
+		if Library.Unloaded then
+			ClearPlayerLabels()
+			break
+		end
+		if PlayerProximityWindowVisible then
+			pcall(UpdateProximityList)
+		end
+		task.wait(0.02)
+	end
 end)
-]]
+
+VisualMods:AddSlider("PlayerProximityDistanceThreshold_Slider", {
+	Text = "Distance Threshold",
+	Default = ProximityMaxDistance,
+	Min = 10,
+	Max = 50000,
+	Rounding = 1,
+	Compact = false,
+
+	Callback = function(Value)
+		ProximityMaxDistance = Value
+	end,
+})
 
 -- ============ 1. Track players ============
 
@@ -1555,3 +1714,65 @@ SaveManager:SetFolder("Project Poke/Deepwoken")
 SaveManager:BuildConfigSection(Tabs["UI Settings"])
 ThemeManager:ApplyToTab(Tabs["UI Settings"])
 SaveManager:LoadAutoloadConfig()
+
+--[[
+Teleports you to depths roof for some reason
+
+local PathfindConnections = {}
+local originalCFrame
+
+General:AddToggle("PathfindBreaker_Toggle", {
+	Text = "Pathfind Breaker (Mob Blind)",
+	Default = false,
+	Tooltip = "Breaks NPC pathfinding by spoofing your server position",
+	Callback = function(Value)
+		if Value then
+			-- 1. Heartbeat fires right before physics replicate to the server.
+			-- We move the character to the sky so the server (and mobs) see you up there.
+			table.insert(PathfindConnections, RunService.Heartbeat:Connect(function()
+				local character = Players.LocalPlayer.Character
+				local root = character and character:FindFirstChild("HumanoidRootPart")
+				if root then
+					originalCFrame = root.CFrame
+					
+					-- Teleport high up to break pathfinding/MoveTo
+					root.CFrame = originalCFrame + Vector3.new(0, 5000, 0)
+					
+					-- Optional: Spiking velocity also breaks AI prediction
+					root.AssemblyLinearVelocity = Vector3.new(0, 0, 0) 
+				end
+			end))
+
+			-- 2. RenderStepped fires right before your screen renders the frame.
+			-- We bring you back down immediately so your screen doesn't glitch.
+			table.insert(PathfindConnections, RunService.RenderStepped:Connect(function()
+				local character = Players.LocalPlayer.Character
+				local root = character and character:FindFirstChild("HumanoidRootPart")
+				
+				-- Restore the CFrame so the client experiences normal gameplay
+				if root and originalCFrame then
+					root.CFrame = originalCFrame
+					originalCFrame = nil
+				end
+			end))
+		else
+			-- Clean up the loops when toggled off
+			for _, conn in ipairs(PathfindConnections) do
+				conn:Disconnect()
+			end
+			table.clear(PathfindConnections)
+			
+			-- Catch the player if they toggled off in the middle of a frame
+			local character = Players.LocalPlayer.Character
+			local root = character and character:FindFirstChild("HumanoidRootPart")
+			if root and originalCFrame then
+				root.CFrame = originalCFrame
+				originalCFrame = nil
+			end
+		end
+	end,
+})
+
+-- Register for safe unloading!
+TrackToggle("PathfindBreaker_Toggle")
+]]
