@@ -240,20 +240,20 @@ local Library = {
 	RegistryMap = {},
 	HudRegistry = {},
 
-	-- Classic Linoria-inspired theme defaults
+	-- colors and font --
 	FontColor = Color3.fromRGB(255, 255, 255),
-	MainColor = Color3.fromRGB(30, 30, 30),
-	BackgroundColor = Color3.fromRGB(17, 17, 17),
+	MainColor = Color3.fromRGB(28, 28, 28),
+	BackgroundColor = Color3.fromRGB(20, 20, 20),
 
-	AccentColor = Color3.fromRGB(66, 135, 245),
-	DisabledAccentColor = Color3.fromRGB(120, 120, 120),
+	AccentColor = Color3.fromRGB(0, 85, 255),
+	DisabledAccentColor = Color3.fromRGB(142, 142, 142),
 
-	OutlineColor = Color3.fromRGB(38, 38, 38),
-	DisabledOutlineColor = Color3.fromRGB(60, 60, 60),
+	OutlineColor = Color3.fromRGB(50, 50, 50),
+	DisabledOutlineColor = Color3.fromRGB(70, 70, 70),
 
-	DisabledTextColor = Color3.fromRGB(140, 140, 140),
+	DisabledTextColor = Color3.fromRGB(142, 142, 142),
 
-	RiskColor = Color3.fromRGB(255, 76, 76),
+	RiskColor = Color3.fromRGB(255, 50, 50),
 
 	Black = Color3.new(0, 0, 0),
 	Font = Enum.Font.Code,
@@ -1162,7 +1162,7 @@ local Templates = { -- TO-DO: do it for missing elements.
 		TabPadding = 1,
 		MenuFadeTime = 0.2,
 		NotifySide = "Left",
-		ShowCustomCursor = false,
+		ShowCustomCursor = true,
 		UnlockMouseWhileOpen = true,
 		Center = false,
 	},
