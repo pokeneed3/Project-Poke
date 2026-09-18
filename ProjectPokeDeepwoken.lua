@@ -223,6 +223,14 @@ local function watchFolderPredicate(folder, groupName, predicate, targetAttribut
 	}
 end
 
+local function watchFolderByName(parent, folderName, groupName, predicate, targetAttributeName)
+	local folder = parent:FindFirstChild(folderName)
+
+	if folder then
+		watchFolderPredicate(folder, groupName, predicate, targetAttributeName)
+	end
+end
+
 local function unwatchFolder(folder)
 	local rec = watchedFolders[folder]
 	if not rec then
@@ -970,24 +978,26 @@ TempStorageVisualTabBoxMain:AddSlider("NPCMaxDistance_Slider", {
 	end,
 })
 
-TempStorageVisualTabBoxMain:AddToggle("Drop_Esp", {
-	Text = "Drop Esp",
+TempStorageVisualTabBoxMain:AddToggle("Chest_Esp", {
+	Text = "Chest Esp",
 	Default = false,
 	Callback = function(Value)
-		local folder = workspace:FindFirstChild("Drops")
+		local folder = workspace:FindFirstChild("Thrown")
 		if not folder then
-			Library:Notify("Drops folder was not found")
+			Library:Notify("Thrown folder was not found")
 			return
 		end
 		if Value then
-			watchFolderPredicate(folder, "Drop")
+			watchFolderPredicate(workspace:FindFirstChild("Thrown"), "Chest", function(instance)
+				return instance.Name == "Chest"
+			end)
 		else
 			unwatchFolder(folder)
 		end
 	end,
 })
 
-TempStorageVisualTabBoxMain:AddSlider("DropMaxDistance_Slider", {
+TempStorageVisualTabBoxMain:AddSlider("ChestMaxDistance_Slider", {
 	Text = "Max Distance",
 	Default = 5000,
 	Min = 100,
@@ -996,7 +1006,7 @@ TempStorageVisualTabBoxMain:AddSlider("DropMaxDistance_Slider", {
 	Compact = false,
 
 	Callback = function(Value)
-		ESPGroups.Drop.MaxDistance = Value
+		ESPGroups.Chest.MaxDistance = Value
 	end,
 })
 
@@ -1013,19 +1023,6 @@ TempStorageVisualTabBoxMain:AddToggle("Chest_ESP", {
 	end,
 })
 ]]
-
-TempStorageVisualTabBoxMain:AddSlider("ChestMaxDistance_Slider", {
-	Text = "Max Distance",
-	Default = 5000,
-	Min = 100,
-	Max = 50000,
-	Rounding = 1,
-	Compact = false,
-
-	Callback = function(Value)
-		ESPGroups.Chest.MaxDistance = Value
-	end,
-})
 
 local chatwindow = game:GetService("TextChatService").ChatWindowConfiguration
 

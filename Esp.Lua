@@ -227,7 +227,7 @@ local function makeTarget(instance, groupOverride)
 			end,
 			IsLocal = (instance == LocalPlayer),
 		}
-	elseif instance:IsA("Model") then
+	else
 		return {
 			Instance = instance,
 			Group = groupOverride or resolveGroup(instance),
