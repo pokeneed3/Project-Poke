@@ -206,7 +206,7 @@ end
 -- ============================================================
 -- Target Construction
 -- ============================================================
-print("hello1")
+
 local function makeTarget(instance, groupOverride)
 	if not instance then
 		return nil

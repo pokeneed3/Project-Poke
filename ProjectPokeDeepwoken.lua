@@ -989,7 +989,7 @@ TempStorageVisualTabBoxMain:AddToggle("Chest_Esp", {
 		end
 		if Value then
 			watchFolderPredicate(workspace:FindFirstChild("Thrown"), "Chest", function(instance)
-				return instance.Name == "Chest"
+				return instance.Name == "Model" or instance.Name == "Chest"
 			end)
 		else
 			unwatchFolder(folder)
@@ -1658,6 +1658,11 @@ trackConnection(RunService.RenderStepped:Connect(function()
 		FPS = FrameCounter
 		FrameTimer = now
 		FrameCounter = 0
+
+		if math.floor(FPS) <= 10 then
+			player:Kick("FPS got too low might have gotten banned maybe gotten saved from this who knows")
+		end
+
 		Library:SetWatermark(
 			("Poke Hub | %s fps | %s ms"):format(
 				tostring(math.floor(FPS)),
