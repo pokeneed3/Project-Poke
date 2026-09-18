@@ -9,8 +9,8 @@ local UserInputService = cloneref(game:GetService("UserInputService"))
 
 local player = game:GetService("Players").LocalPlayer
 
-if not player.Character then
-	player.CharacterAdded:Wait()
+if not game:IsLoaded() then
+	game.Loaded:Wait()
 end
 
 local Camera = workspace.CurrentCamera
@@ -274,7 +274,7 @@ General:AddToggle("Speed", {
 	Callback = function(Value)
 		if Value then
 			task.spawn(function()
-				SpeedConnection = RunService.Heartbeat:Connect(function()
+				SpeedConnection = RunService.RenderStepped:Connect(function()
 					local player = Players.LocalPlayer
 					local character = player.Character
 					if not character then
@@ -654,7 +654,7 @@ General:AddToggle("AntiAFK_Toggle", {
 
 TrackToggle("AntiAFK_Toggle")
 
-local OverlayGui = game:GetService("Players").LocalPlayer.PlayerGui:WaitForChild("OverlayGui", 10)
+local OverlayGui = game:GetService("Players").LocalPlayer.PlayerGui:WaitForChild("OverlayGui", 2)
 
 local RemoveInsanityActive = false
 General:AddToggle("RemoveInsanityScreen_Toggle", {
@@ -1124,10 +1124,10 @@ VisualMods:AddSlider("MaxZoom_Slider", {
 	end,
 })
 
-local PlayerGui = player:WaitForChild("PlayerGui", 10)
-local LeaderboardGui = PlayerGui and PlayerGui:WaitForChild("LeaderboardGui", 10)
-local LeaderboardMainFrame = LeaderboardGui and LeaderboardGui:WaitForChild("MainFrame", 10)
-local ScrollingFrame = LeaderboardMainFrame and LeaderboardMainFrame:WaitForChild("ScrollingFrame", 10)
+local PlayerGui = player:WaitForChild("PlayerGui", 2)
+local LeaderboardGui = PlayerGui and PlayerGui:WaitForChild("LeaderboardGui", 2)
+local LeaderboardMainFrame = LeaderboardGui and LeaderboardGui:WaitForChild("MainFrame", 2)
+local ScrollingFrame = LeaderboardMainFrame and LeaderboardMainFrame:WaitForChild("ScrollingFrame", 2)
 
 if not ScrollingFrame then
 	Library:Notify("Leaderboard UI was not found; leaderboard spectate disabled")
@@ -1362,6 +1362,58 @@ VisualMods:AddToggle("RemoveBlur_Toggle", {
 		end
 	end,
 })
+
+local PlayerProximityWindowVisible = true
+
+VisualMods:AddToggle("PlayerProximity_Toggle", {
+	Text = "Player Proximity",
+	Default = true,
+
+	Callback = function(Value)
+		if Value then
+		else
+		end
+	end,
+})
+
+--[[
+local PlayerProximityWindow = Library:CreateWindow({
+	Title = "Player Proximity",
+	AutoShow = PlayerProximityWindowVisible,
+	Size = UDim2.fromOffset(300, 150),
+})
+]]
+
+--[[
+local function UpdateProximityLabel()
+    local char = player.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then
+        ProxLabel:SetText("Nearby: 0")
+        return
+    end
+
+    local count = 0
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= player and plr.Character then
+            local otherRoot = plr.Character:FindFirstChild("HumanoidRootPart")
+            if otherRoot then
+                local distance = (root.Position - otherRoot.Position).Magnitude
+                if distance <= 100 then
+                    count += 1
+                end
+            end
+        end
+    end
+
+    ProxLabel:SetText("Nearby: " .. count)
+end
+
+RunService.RenderStepped:Connect(function()
+    UpdateProximityLabel()
+end)
+]]
 
 -- ============ 1. Track players ============
 
