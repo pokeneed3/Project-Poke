@@ -7,6 +7,12 @@ local ReplicatedStorage = cloneref(game:GetService("ReplicatedStorage"))
 local Stats = game:GetService("Stats")
 local UserInputService = cloneref(game:GetService("UserInputService"))
 
+local player = game.Players.LocalPlayer
+
+if not player.Character then
+	player.CharacterAdded:Wait()
+end
+
 local Camera = workspace.CurrentCamera
 
 -- Variables
@@ -276,8 +282,8 @@ General:AddToggle("Speed", {
 						return
 					end
 
-					local humanoid = character:FindFirstChildOfClass("Humanoid")
-					local root = character:FindFirstChild("HumanoidRootPart")
+					local humanoid = character:WaitForChild("Humanoid")
+					local root = character:WaitForChild("HumanoidRootPart")
 					if not humanoid or not root or humanoid.Health <= 0 then
 						return
 					end
@@ -301,8 +307,8 @@ General:AddToggle("Speed", {
 					return
 				end
 
-				local humanoid = character:FindFirstChildOfClass("Humanoid")
-				local root = character:FindFirstChild("HumanoidRootPart")
+				local humanoid = character:WaitForChild("Humanoid")
+				local root = character:WaitForChild("HumanoidRootPart")
 
 				if not humanoid or not root or humanoid.Health <= 0 then
 					return
@@ -489,8 +495,8 @@ General:AddToggle("InfiniteJump_Toggle", {
 				if not character then
 					return
 				end
-				local root = character:FindFirstChild("HumanoidRootPart")
-				local humanoid = character:FindFirstChildOfClass("Humanoid")
+				local root = character:WaitForChild("HumanoidRootPart")
+				local humanoid = character:WaitForChild("Humanoid")
 				if not (root and humanoid) or humanoid.Health <= 0 then
 					return
 				end
@@ -538,32 +544,50 @@ MainSettings:AddSlider("InfJumpSlider", {
 })
 
 local NoFallDmgEnabled = false
+local FallDamageSearchActive = false
 
 local function hookFallDmgFunction()
-	local WorldClient = game.Players.LocalPlayer.PlayerGui:FindFirstChild("WorldClient")
-	local env = getsenv(WorldClient)
-
-	local fallName, originalFall
-	for name, value in pairs(env) do
-		if type(value) == "function" and name:lower():find("fall") then
-			fallName, originalFall = name, value
-			break
-		end
-	end
-
-	if not originalFall then
-		warn("Could not find fall function")
+	if FallDamageSearchActive then
 		return
 	end
 
+	FallDamageSearchActive = true
 	NoFallDmgEnabled = true
 
-	env[fallName] = function(...)
-		if NoFallDmgEnabled then
-			return
+	task.spawn(function()
+		while FallDamageSearchActive and NoFallDmgEnabled do
+			local WorldClient = Players.LocalPlayer.PlayerGui:FindFirstChild("WorldClient")
+			local originalFall
+			local fallName
+
+			if WorldClient then
+				local env = getsenv(WorldClient)
+				for name, value in pairs(env) do
+					if type(value) == "function" and name:lower():find("fall") then
+						fallName, originalFall = name, value
+						break
+					end
+				end
+			end
+
+			if originalFall then
+				local env = getsenv(WorldClient)
+				env[fallName] = function(...)
+					if NoFallDmgEnabled then
+						return
+					end
+					return originalFall(...)
+				end
+
+				FallDamageSearchActive = false
+				return
+			end
+
+			task.wait(1)
 		end
-		return originalFall(...)
-	end
+
+		FallDamageSearchActive = false
+	end)
 end
 
 General:AddToggle("NoFallDmg_Toggle", {
@@ -574,6 +598,7 @@ General:AddToggle("NoFallDmg_Toggle", {
 			hookFallDmgFunction()
 		else
 			NoFallDmgEnabled = false
+			FallDamageSearchActive = false
 		end
 	end,
 })
@@ -630,7 +655,7 @@ General:AddToggle("AntiAFK_Toggle", {
 
 TrackToggle("AntiAFK_Toggle")
 
-local OverlayGui = game:GetService("Players").LocalPlayer.PlayerGui.OverlayGui
+local OverlayGui = game:GetService("Players").LocalPlayer.PlayerGui:WaitForChild("OverlayGui")
 
 local RemoveInsanityActive = false
 General:AddToggle("RemoveInsanityScreen_Toggle", {
@@ -639,9 +664,9 @@ General:AddToggle("RemoveInsanityScreen_Toggle", {
 	Tooltip = "Removes the blue screen you get when insane",
 	Callback = function(Value)
 		if Value then
-			local TerrorImg = OverlayGui:FindFirstChild("Terror")
-			local TerrorTendril = OverlayGui:FindFirstChild("TerrorTendril")
-			local TerrorTendril2 = OverlayGui:FindFirstChild("TerrorTendril2")
+			local TerrorImg = OverlayGui:WaitForChild("Terror")
+			local TerrorTendril = OverlayGui:WaitForChild("TerrorTendril")
+			local TerrorTendril2 = OverlayGui:WaitForChild("TerrorTendril2")
 			RemoveInsanityActive = true
 
 			task.spawn(function()
@@ -881,7 +906,7 @@ TempStorageVisualTabBoxMain:AddToggle("Mob_ESP", {
 	Text = "Mob Esp",
 	Default = false,
 	Callback = function(Value)
-		local folder = workspace:FindFirstChild("Live")
+		local folder = workspace:WaitForChild("Live")
 		if Value then
 			watchFolderPredicate(folder, "Mob", isMob, "MOB_rich_name")
 		else
@@ -907,7 +932,7 @@ TempStorageVisualTabBoxMain:AddToggle("NPC_ESP", {
 	Text = "Npc Esp",
 	Default = false,
 	Callback = function(Value)
-		local folder = workspace:FindFirstChild("NPCs")
+		local folder = workspace:WaitForChild("NPCs")
 		if Value then
 			watchFolderPredicate(folder, "NPC")
 		else
@@ -933,7 +958,7 @@ TempStorageVisualTabBoxMain:AddToggle("Drop_Esp", {
 	Text = "Drop Esp",
 	Default = false,
 	Callback = function(Value)
-		local folder = workspace:FindFirstChild("Drops")
+		local folder = workspace:WaitForChild("Drops")
 		if Value then
 			watchFolderPredicate(folder, "Drop")
 		else
@@ -1001,7 +1026,7 @@ local RemoveFogConnection
 local Original_FogStart = Lighting.FogStart
 local Original_FogEnd = Lighting.FogEnd
 
-local Atmosphere = Lighting:FindFirstChild("Atmosphere")
+local Atmosphere = Lighting:WaitForChild("Atmosphere")
 local Original_Density = Atmosphere.Density
 VisualMods:AddToggle("Remove_Fog", {
 	Text = "No Fog",
@@ -1074,7 +1099,9 @@ VisualMods:AddSlider("MaxZoom_Slider", {
 	end,
 })
 
-local ScrollingFrame = player.PlayerGui.LeaderboardGui.MainFrame.ScrollingFrame
+local LeaderboardGui = player:WaitForChild("PlayerGui"):WaitForChild("LeaderboardGui")
+local LeaderboardMainFrame = LeaderboardGui:WaitForChild("MainFrame")
+local ScrollingFrame = LeaderboardMainFrame:WaitForChild("ScrollingFrame")
 
 local leaderboardspectateLoops = {}
 local currentSpectateLoop
@@ -1145,7 +1172,7 @@ local function setupClick(label)
 
 			if
 				not findCharacterByLabelText(spectateName)
-				or not findCharacterByLabelText(spectateName):FindFirstChild("Humanoid")
+				or not findCharacterByLabelText(spectateName):WaitForChild("Humanoid", 5)
 			then
 				Library:Notify(`{findCharacterByLabelText(spectateName)} doesnt have a valid Character or Humanoid`)
 
@@ -1160,7 +1187,7 @@ local function setupClick(label)
 			currentSpectateLabel = label
 			currentSpectateName = spectateName
 
-			local humanoid = player.Character:FindFirstChild("Humanoid")
+			local humanoid = player.Character:WaitForChild("Humanoid")
 
 			if humanoid then
 				local previousHealth = humanoid.Health
@@ -1250,11 +1277,13 @@ VisualMods:AddToggle("LeaderboardSpectate_Toggle", {
 	end,
 })
 
-local LeaderboardPlayerTextLabel =
-	game:GetService("Players").LocalPlayer.PlayerGui.LeaderboardGui.MainFrame.ScrollingFrame.PlayerFrame.PlayerFrame.Player :: TextLabel
+local LeaderboardPlayerTextLabel = LeaderboardMainFrame:WaitForChild("ScrollingFrame")
+	:WaitForChild("PlayerFrame")
+	:WaitForChild("PlayerFrame")
+	:WaitForChild("Player") :: TextLabel
 
 local LeaderPlayerFrameButton =
-	game:GetService("Players").LocalPlayer.PlayerGui.LeaderboardGui.MainFrame.ScrollingFrame.PlayerFrame :: TextButton
+	LeaderboardMainFrame:WaitForChild("ScrollingFrame"):WaitForChild("PlayerFrame") :: TextButton
 
 local StreamerModeConnections = {}
 
@@ -1282,7 +1311,7 @@ VisualMods:AddToggle("RemoveBlur_Toggle", {
 	Callback = function(Value)
 		if Value then
 			RemoveBlurConnection = RunService.RenderStepped:Connect(function()
-				game:GetService("Lighting").GenericBlur.Size = 0
+				game:GetService("Lighting"):WaitForChild("GenericBlur").Size = 0
 			end)
 		else
 			if RemoveBlurConnection then
@@ -1291,21 +1320,6 @@ VisualMods:AddToggle("RemoveBlur_Toggle", {
 		end
 	end,
 })
-
---game:GetService("Lighting").GenericBlur
-
---[[
-ESP:NewBar({
-	Name = "Health",
-	Side = "Left",
-	Width = 2,
-	LerpColor = true,
-	GetValue = function(char, player)
-		local hum = char:FindFirstChildOfClass("Humanoid")
-		return hum and hum.Health or 0, hum and hum.MaxHealth or 100
-	end,
-})
-]]
 
 -- ============ 1. Track players ============
 
