@@ -7,14 +7,13 @@ local ReplicatedStorage = cloneref(game:GetService("ReplicatedStorage"))
 local Stats = game:GetService("Stats")
 local UserInputService = cloneref(game:GetService("UserInputService"))
 
-local player = game.Players.LocalPlayer
+local player = game:GetService("Players").LocalPlayer
 
 if not player.Character then
 	player.CharacterAdded:Wait()
 end
 
 local Camera = workspace.CurrentCamera
-
 -- Variables
 local Connections = {}
 
@@ -1035,7 +1034,10 @@ VisualMods:AddToggle("Remove_Fog", {
 	Callback = function(Value)
 		if Value then
 			RemoveFogConnection = RunService.RenderStepped:Connect(function()
-				Atmosphere.Density = 0
+				if Atmosphere then
+					Atmosphere.Density = 0
+				end
+
 				Lighting.FogEnd = math.huge
 				Lighting.FogStart = math.huge
 			end)
@@ -1355,6 +1357,8 @@ Players.PlayerAdded:Connect(function(player)
 
 	checkForModerator(player)
 end)
+
+checkForModerator(player)
 
 local CharacterAddedConnection = player.CharacterAdded:Connect(function()
 	if NoFallDmgEnabled then
