@@ -654,7 +654,7 @@ General:AddToggle("AntiAFK_Toggle", {
 
 TrackToggle("AntiAFK_Toggle")
 
-local OverlayGui = game:GetService("Players").LocalPlayer.PlayerGui:WaitForChild("OverlayGui")
+local OverlayGui = game:GetService("Players").LocalPlayer.PlayerGui:WaitForChild("OverlayGui", 10)
 
 local RemoveInsanityActive = false
 General:AddToggle("RemoveInsanityScreen_Toggle", {
@@ -663,9 +663,18 @@ General:AddToggle("RemoveInsanityScreen_Toggle", {
 	Tooltip = "Removes the blue screen you get when insane",
 	Callback = function(Value)
 		if Value then
-			local TerrorImg = OverlayGui:WaitForChild("Terror")
-			local TerrorTendril = OverlayGui:WaitForChild("TerrorTendril")
-			local TerrorTendril2 = OverlayGui:WaitForChild("TerrorTendril2")
+			if not OverlayGui then
+				Library:Notify("OverlayGui was not found")
+				return
+			end
+
+			local TerrorImg = OverlayGui:FindFirstChild("Terror")
+			local TerrorTendril = OverlayGui:FindFirstChild("TerrorTendril")
+			local TerrorTendril2 = OverlayGui:FindFirstChild("TerrorTendril2")
+			if not TerrorImg or not TerrorTendril or not TerrorTendril2 then
+				Library:Notify("Insanity UI elements were not found")
+				return
+			end
 			RemoveInsanityActive = true
 
 			task.spawn(function()
@@ -905,7 +914,11 @@ TempStorageVisualTabBoxMain:AddToggle("Mob_ESP", {
 	Text = "Mob Esp",
 	Default = false,
 	Callback = function(Value)
-		local folder = workspace:WaitForChild("Live")
+		local folder = workspace:FindFirstChild("Live")
+		if not folder then
+			Library:Notify("Live folder was not found")
+			return
+		end
 		if Value then
 			watchFolderPredicate(folder, "Mob", isMob, "MOB_rich_name")
 		else
@@ -931,7 +944,11 @@ TempStorageVisualTabBoxMain:AddToggle("NPC_ESP", {
 	Text = "Npc Esp",
 	Default = false,
 	Callback = function(Value)
-		local folder = workspace:WaitForChild("NPCs")
+		local folder = workspace:FindFirstChild("NPCs")
+		if not folder then
+			Library:Notify("NPCs folder was not found")
+			return
+		end
 		if Value then
 			watchFolderPredicate(folder, "NPC")
 		else
@@ -957,7 +974,11 @@ TempStorageVisualTabBoxMain:AddToggle("Drop_Esp", {
 	Text = "Drop Esp",
 	Default = false,
 	Callback = function(Value)
-		local folder = workspace:WaitForChild("Drops")
+		local folder = workspace:FindFirstChild("Drops")
+		if not folder then
+			Library:Notify("Drops folder was not found")
+			return
+		end
 		if Value then
 			watchFolderPredicate(folder, "Drop")
 		else
@@ -1025,8 +1046,8 @@ local RemoveFogConnection
 local Original_FogStart = Lighting.FogStart
 local Original_FogEnd = Lighting.FogEnd
 
-local Atmosphere = Lighting:WaitForChild("Atmosphere", 5)
-local Original_Density = Atmosphere.Density
+local Atmosphere = Lighting:FindFirstChild("Atmosphere")
+local Original_Density = Atmosphere and Atmosphere.Density or 0
 VisualMods:AddToggle("Remove_Fog", {
 	Text = "No Fog",
 	Default = false,
@@ -1047,7 +1068,9 @@ VisualMods:AddToggle("Remove_Fog", {
 			end
 			Lighting.FogEnd = Original_FogStart
 			Lighting.FogStart = Original_FogEnd
-			Atmosphere.Density = Original_Density
+			if Atmosphere then
+				Atmosphere.Density = Original_Density
+			end
 		end
 	end,
 })
@@ -1101,9 +1124,14 @@ VisualMods:AddSlider("MaxZoom_Slider", {
 	end,
 })
 
-local LeaderboardGui = player:WaitForChild("PlayerGui"):WaitForChild("LeaderboardGui")
-local LeaderboardMainFrame = LeaderboardGui:WaitForChild("MainFrame")
-local ScrollingFrame = LeaderboardMainFrame:WaitForChild("ScrollingFrame")
+local PlayerGui = player:WaitForChild("PlayerGui", 10)
+local LeaderboardGui = PlayerGui and PlayerGui:WaitForChild("LeaderboardGui", 10)
+local LeaderboardMainFrame = LeaderboardGui and LeaderboardGui:WaitForChild("MainFrame", 10)
+local ScrollingFrame = LeaderboardMainFrame and LeaderboardMainFrame:WaitForChild("ScrollingFrame", 10)
+
+if not ScrollingFrame then
+	Library:Notify("Leaderboard UI was not found; leaderboard spectate disabled")
+end
 
 local leaderboardspectateLoops = {}
 local currentSpectateLoop
@@ -1261,6 +1289,11 @@ VisualMods:AddToggle("LeaderboardSpectate_Toggle", {
 
 	Callback = function(Value)
 		if Value then
+			if not ScrollingFrame then
+				Library:Notify("Leaderboard UI is unavailable")
+				return
+			end
+
 			local TextLabelConnection = ScrollingFrame.DescendantAdded:Connect(function(desc)
 				if desc.Name == "Player" and desc:IsA("TextLabel") then
 					setupClick(desc)
@@ -1279,13 +1312,15 @@ VisualMods:AddToggle("LeaderboardSpectate_Toggle", {
 	end,
 })
 
-local LeaderboardPlayerTextLabel = LeaderboardMainFrame:WaitForChild("ScrollingFrame")
-	:WaitForChild("PlayerFrame")
-	:WaitForChild("PlayerFrame")
-	:WaitForChild("Player") :: TextLabel
+local LeaderboardPlayerTextLabel = LeaderboardMainFrame
+	and LeaderboardMainFrame:FindFirstChild("ScrollingFrame")
+	and LeaderboardMainFrame.ScrollingFrame:FindFirstChild("PlayerFrame")
+	and LeaderboardMainFrame.ScrollingFrame.PlayerFrame:FindFirstChild("PlayerFrame")
+	and LeaderboardMainFrame.ScrollingFrame.PlayerFrame.PlayerFrame:FindFirstChild("Player") :: TextLabel
 
-local LeaderPlayerFrameButton =
-	LeaderboardMainFrame:WaitForChild("ScrollingFrame"):WaitForChild("PlayerFrame") :: TextButton
+local LeaderPlayerFrameButton = LeaderboardMainFrame
+	and LeaderboardMainFrame:FindFirstChild("ScrollingFrame")
+	and LeaderboardMainFrame.ScrollingFrame:FindFirstChild("PlayerFrame") :: TextButton
 
 local StreamerModeConnections = {}
 
@@ -1295,6 +1330,11 @@ VisualMods:AddToggle("StreamerMode_Toggle", {
 	Tooltip = "Hides your account information like your username and userid",
 
 	Callback = function(Value)
+		if not LeaderPlayerFrameButton then
+			Library:Notify("Leaderboard UI is unavailable")
+			return
+		end
+
 		if Value then
 			LeaderPlayerFrameButton.Visible = false
 		else
