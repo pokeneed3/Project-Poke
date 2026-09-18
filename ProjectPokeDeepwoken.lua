@@ -1025,7 +1025,7 @@ local RemoveFogConnection
 local Original_FogStart = Lighting.FogStart
 local Original_FogEnd = Lighting.FogEnd
 
-local Atmosphere = Lighting:WaitForChild("Atmosphere")
+local Atmosphere = Lighting:WaitForChild("Atmosphere", 5)
 local Original_Density = Atmosphere.Density
 VisualMods:AddToggle("Remove_Fog", {
 	Text = "No Fog",
